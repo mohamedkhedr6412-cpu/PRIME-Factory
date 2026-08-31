@@ -1,15 +1,16 @@
 """
-PRIME-Factory Machine Model
-Defines the 5 core physical assets with electro-mechanical response.
+PRIME-Factory Machine Model v2.0
+Defines the 5 core physical assets with distinct nominal ratings and electro-mechanical responses.
 """
 import numpy as np
 import config
 
 class Machine:
-    def __init__(self, machine_id: str, name: str, has_vibration: bool = False):
+    def __init__(self, machine_id: str, name: str, has_vibration: bool = False, nominal_kw: float = 5.0):
         self.machine_id = machine_id
         self.name = name
         self.has_vibration = has_vibration
+        self.nominal_kw = nominal_kw
         self.state = config.STATE_NORMAL
         self.degradation_level = 0.0  # من 0.0 (سليم تمامًا) إلى 1.0 (عطل كامل)
         
@@ -22,11 +23,11 @@ class Machine:
     def step(self, product_key: str, dt_minutes: float = 1.0) -> dict:
         prod = config.PRODUCTS[product_key]
         
-        # 1. تحديد السرعة والحمل الطبيعيين
+        # 1. تحديد السرعة والحمل الطبيعيين بناءً على قدرة الماكينة والمنتج
         speed_rpm = 1500.0 * prod["speed_factor"] * (1.0 - 0.05 * self.degradation_level)
-        load_kw = prod["nominal_power_kw"] * prod["load_factor"]
+        load_kw = self.nominal_kw * prod["load_factor"]
         
-        # 2. تأثير التدهور الميكانيكي على الاحتكاك واستهلاك القدرة
+        # 2. تأثير التدهور الميكانيكي على زيادة الاحتكاك واستهلاك القدرة
         power_penalty = load_kw * (0.35 * self.degradation_level)
         actual_power_kw = load_kw + power_penalty + np.random.normal(0, 0.05)
         
@@ -59,6 +60,7 @@ class Machine:
 
         return {
             "machine_id": self.machine_id,
+            "machine_name": self.name,
             "state": self.state,
             "product": product_key,
             "speed_rpm": round(speed_rpm, 2),

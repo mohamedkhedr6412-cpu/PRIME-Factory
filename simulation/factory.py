@@ -1,5 +1,5 @@
 """
-PRIME-Factory Simulation: Packaging Line Integration
+PRIME-Factory Simulation: Packaging Line Integration v2.0
 """
 import pandas as pd
 from simulation.machines import Machine
@@ -7,12 +7,15 @@ import config
 
 class PackagingFactory:
     def __init__(self):
+        # إنشاء الماكينات الخمس تلقائيًا مع قدراتها الاسمية المحددة في config
         self.machines = [
-            Machine("M1", "Conveyor", has_vibration=False),
-            Machine("M2", "Filler", has_vibration=False),
-            Machine("M3", "Sealer", has_vibration=True),
-            Machine("M4", "Labeler", has_vibration=True),
-            Machine("M5", "Packaging", has_vibration=True)
+            Machine(
+                machine_id=m_id,
+                name=meta["name"],
+                has_vibration=meta["has_vibration"],
+                nominal_kw=meta["nominal_kw"]
+            )
+            for m_id, meta in config.MACHINES.items()
         ]
 
     def run_simulation(self, product_schedule: list, degradation_targets: dict = None) -> pd.DataFrame:

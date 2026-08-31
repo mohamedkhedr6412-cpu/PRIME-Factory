@@ -1,11 +1,10 @@
 """
-PRIME-Factory Interactive Streamlit Dashboard
-Real-Time Demonstration & Judging Interface for RoboDam 2026
+PRIME-Factory Interactive Streamlit Dashboard v2.0
+Competition-Ready Judging & Demonstration Interface for RoboDam 2026
 """
 import sys
 import os
 
-# إضافة المسار الرئيسي للمشروع
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import streamlit as st
@@ -17,46 +16,56 @@ from plotly.subplots import make_subplots
 
 import config
 from simulation.factory import PackagingFactory
-from simulation.faults import generate_degradation_profile
+from simulation.faults import generate_degradation_profile, generate_switching_schedule, inject_sensor_noise_spikes
 from energy.eci import calculate_eci
-from energy.energy_model import calculate_total_energy_kwh, calculate_peak_demand_kw
+from energy.energy_model import calculate_total_energy_kwh, calculate_peak_demand_kw, calculate_financial_and_esg_impact
 from ai.isolation_forest import PRIMEIsolationForest
 from ai.anomaly import AnomalyProcessor
-from ai.health_index import calculate_health_index, map_hi_to_decision
-from maintenance.policies import PolicySimulator
-from evaluation.kpis import calculate_oee, calculate_energy_kpi
-from energy.peak_shaving import apply_peak_shaving
+from ai.health_index import calculate_health_index_and_evidence, map_hi_to_decision
+from maintenance.policies import FactoryPolicySimulator
+from evaluation.ablation import run_ablation_study
 
-# إعداد الصفحة وتصميمها
-st.set_page_config(page_title="PRIME-Factory | Industry 4.0 Dashboard", layout="wide")
+# إعداد تصميم الصفحة
+st.set_page_config(page_title="PRIME-Factory | Industry 4.0 Platform", layout="wide", page_icon="🏭")
 
-st.title("🏭 PRIME-Factory: Smart Packaging Line Monitoring & EMS")
+st.title("🏭 PRIME-Factory: Predictive, Resilient & Energy-Efficient Industry 4.0 Platform")
 st.caption("National Competition for AI and Robotics (RoboDam 2026) | Team MSA")
 
 # ==========================================
 # القائمة الجانبية للتحكم (Sidebar Controls)
 # ==========================================
-st.sidebar.header("⚙️ Simulation Controls")
+st.sidebar.header("⚙️ Experiment & Line Controls")
 
-selected_product = st.sidebar.selectbox(
-    "Operating Product Context:",
-    options=["Product_A", "Product_B", "Product_C"],
-    index=1,
-    help="Changes load, speed, and expected baseline power."
+sim_mode = st.sidebar.radio(
+    "Operating Schedule Mode:",
+    options=["Fixed Product Regime", "Multi-Product Switching (A -> B -> C)"],
+    index=0,
+    help="Tests contextual intelligence and false alarm rejection during production recipe switches."
 )
 
+if sim_mode == "Fixed Product Regime":
+    selected_product = st.sidebar.selectbox("Operating Product Context:", options=["Product_A", "Product_B", "Product_C"], index=1)
+else:
+    selected_product = "Dynamic (A -> B -> C)"
+
+st.sidebar.subheader("Fault & Stress Injection")
 inject_fault = st.sidebar.checkbox("Inject Bearing Degradation (M3 Sealer)", value=True)
 fault_start = st.sidebar.slider("Degradation Start Time (Minute):", min_value=10, max_value=400, value=120)
-max_deg = st.sidebar.slider("Max Degradation Level (%):", min_value=5, max_value=60, value=35) / 100.0
+max_deg = st.sidebar.slider("Max Degradation Level (%):", min_value=10, max_value=85, value=40) / 100.0
 
-apply_dr = st.sidebar.checkbox("Enable Demand Response (Peak Shaving)", value=False)
+enable_chaos = st.sidebar.checkbox("Chaos Stress-Test (Sensor Noise Spikes)", value=False, help="Injects transient sensor noise to demonstrate persistence filter resilience.")
+apply_dr = st.sidebar.checkbox("Enable Peak Shaving (Demand Response)", value=False)
 
 # ==========================================
-# تشغيل المحاكاة ومعالجة البيانات
+# تشغيل المحاكاة ومعالجة مسار الذكاء الاصطناعي
 # ==========================================
 @st.cache_data
-def run_full_pipeline(prod_key, fault_enabled, start_t, max_d, dr_enabled):
-    schedule = [prod_key] * config.TOTAL_TIMESTEPS
+def run_master_pipeline(mode, prod_key, fault_enabled, start_t, max_d, chaos_enabled, dr_enabled):
+    if mode == "Fixed Product Regime":
+        schedule = [prod_key] * config.TOTAL_TIMESTEPS
+    else:
+        schedule = generate_switching_schedule(config.TOTAL_TIMESTEPS)
+
     degradation_plan = None
     if fault_enabled:
         profile = generate_degradation_profile(config.TOTAL_TIMESTEPS, start_time=start_t, max_degradation=max_d)
@@ -64,182 +73,202 @@ def run_full_pipeline(prod_key, fault_enabled, start_t, max_d, dr_enabled):
 
     factory = PackagingFactory()
     df = factory.run_simulation(schedule, degradation_targets=degradation_plan)
-    
-    # تدريب الذكاء الاصطناعي على التشغيل السليم
+
+    # تطبيق تشويش الحساسات في وضع الفوضى
+    if chaos_enabled:
+        vib_vals = df[df["machine_id"] == "M3"]["vibration_rms"].values
+        df.loc[df["machine_id"] == "M3", "vibration_rms"] = inject_sensor_noise_spikes(vib_vals, spike_probability=0.04)
+
+    # تدريب الذكاء الاصطناعي على الحالات السليمة
     ai_model = PRIMEIsolationForest(contamination=0.02)
     ai_model.fit(df[df["degradation"] == 0.0])
-    
-    df["eci"] = df.apply(lambda row: calculate_eci(row["power_kw"], row["product"]), axis=1)
+
+    df["eci"] = df.apply(lambda r: calculate_eci(r["power_kw"], r["machine_id"], r["product"], r["speed_rpm"]), axis=1)
     df["ai_score"] = ai_model.predict_anomaly_score(df)
-    
-    # حساب HI والاستمرارية للماكينة M3
+
+    # حساب مؤشر الصحة و RUL للماكينة M3
     m3_df = df[df["machine_id"] == "M3"].copy()
     processor = AnomalyProcessor(window_size=config.PERSISTENCE_WINDOW)
-    hi_list, conf_list = [], []
-    
+    hi_list, conf_list, pers_list, rul_list, attr_list = [], [], [], [], []
+    prev_hi = 100.0
+
     for _, row in m3_df.iterrows():
         p_info = processor.update(row["ai_score"], threshold=0.5)
-        hi = calculate_health_index(row["ai_score"], p_info["persistence_ratio"], row["eci"], row["temperature_c"])
-        hi_list.append(hi)
+        hi_res = calculate_health_index_and_evidence(
+            anomaly_score=row["ai_score"],
+            persistence_ratio=p_info["persistence_ratio"],
+            eci=row["eci"],
+            temp_c=row["temperature_c"],
+            vib_rms=row["vibration_rms"],
+            prev_hi=prev_hi
+        )
+        prev_hi = hi_res["health_index"]
+        hi_list.append(hi_res["health_index"])
+        rul_list.append(hi_res["rul_minutes"])
+        pers_list.append(p_info["persistence_ratio"])
         conf_list.append(p_info["is_confirmed_anomaly"])
-        
+        attr_list.append(hi_res["attribution"])
+
     m3_df["health_index"] = hi_list
+    m3_df["persistence_ratio"] = pers_list
     m3_df["confirmed_anomaly"] = conf_list
-    return df, m3_df
+    m3_df["rul_minutes"] = rul_list
+    m3_df["raw_ai_score"] = m3_df["ai_score"]
+    m3_df["context_ai_score"] = m3_df["ai_score"]
 
-df_all, df_m3 = run_full_pipeline(selected_product, inject_fault, fault_start, max_deg, apply_dr)
+    return df, m3_df, attr_list[-1]
+
+df_all, df_m3, latest_attr = run_master_pipeline(sim_mode, selected_product, inject_fault, fault_start, max_deg, enable_chaos, apply_dr)
 
 # ==========================================
-# بطاقات مؤشرات الأداء الحية (Top KPI Metrics)
+# بطاقات مؤشرات الأداء الحية (Factory KPIs)
 # ==========================================
-total_energy = calculate_total_energy_kwh(df_all["power_kw"])
-peak_kw = calculate_peak_demand_kw(df_all["power_kw"])
+total_energy = calculate_total_energy_kwh(df_all)
+peak_kw = calculate_peak_demand_kw(df_all)
 latest_hi = df_m3["health_index"].iloc[-1]
 latest_eci = df_m3["eci"].iloc[-1]
+latest_rul = df_m3["rul_minutes"].iloc[-1]
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Factory Total Energy", f"{total_energy:.2f} kWh")
-col2.metric("Peak Demand", f"{peak_kw:.2f} kW")
-col3.metric("M3 Health Index (HI)", f"{latest_hi:.1f} / 100", delta=f"{latest_hi - 100:.1f}", delta_color="inverse")
-col4.metric("M3 Energy Dev. (ECI)", f"{latest_eci:+.3f}", delta=f"{(latest_eci)*100:+.1f}%")
+fin_metrics = calculate_financial_and_esg_impact(total_energy, downtime_minutes=0, good_units=16000)
 
-# تنبيه حالة الماكينة
+c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("Factory Total Energy", f"{total_energy:.1f} kWh")
+c2.metric("Factory Peak Demand", f"{peak_kw:.1f} kW")
+c3.metric("M3 Health Index (HI)", f"{latest_hi:.1f} / 100", delta=f"{latest_hi - 100:.1f}", delta_color="inverse")
+c4.metric("Estimated RUL", f"{latest_rul} min" if latest_rul > 0 else "0 min (Failed)")
+c5.metric("Est. Energy Cost", f"${fin_metrics['energy_cost_usd']:.1f}", delta=f"{fin_metrics['carbon_kg']:.1f} kg CO2", delta_color="off")
+
+# تنبيه حالة الماكينة الحالية
 decision_state = map_hi_to_decision(latest_hi)
 if latest_hi >= 70:
-    st.success(f"🟢 **Machine Operational Status:** {decision_state}")
+    st.success(f"🟢 **Machine Status:** {decision_state}")
 elif latest_hi >= 50:
-    st.warning(f"🟡 **Machine Operational Status:** {decision_state}")
+    st.warning(f"🟡 **Machine Status:** {decision_state}")
 else:
-    st.error(f"🔴 **Machine Operational Status:** {decision_state}")
+    st.error(f"🔴 **Machine Status:** {decision_state}")
 
 st.divider()
 
 # ==========================================
-# الرسوم البيانية التفاعلية المنظمة
+# تبويبات العرض والتحكيم
 # ==========================================
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Condition Monitoring & Health Index",
-    "⚡ Energy & ECI Anomaly Tracking",
+t1, t2, t3, t4, t5, t6 = st.tabs([
+    "📊 Asset Condition & RUL",
+    "⚡ Energy Intelligence & ECI",
+    "🧠 Explainable AI & Evidence",
     "🏭 5-Machine Line Overview",
-    "🏆 Policy Benchmark Comparison"
+    "🏆 Factory Policy Benchmark",
+    "🔬 True Architectural Ablation"
 ])
 
-# ----------------- Tab 1: Condition Monitoring -----------------
-with tab1:
+# ----------------- Tab 1: Condition & RUL -----------------
+with t1:
     fig_cond = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.1,
-        subplot_titles=("Vibration RMS (g) & Temperature (°C)", "PRIME Health Index (HI) [0 - 100]")
+        rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+        subplot_titles=("Physical Telemetry: Vibration RMS (g) & Temperature (°C)", "PRIME Composite Health Index (HI)")
     )
-    
-    # الصف العلوي: الاهتزاز والحرارة
-    fig_cond.add_trace(
-        go.Scatter(x=df_m3["timestep"], y=df_m3["vibration_rms"], name="Vibration RMS (g)", line=dict(color="#1f77b4", width=2)),
-        row=1, col=1
-    )
-    fig_cond.add_trace(
-        go.Scatter(x=df_m3["timestep"], y=df_m3["temperature_c"], name="Temperature (°C)", line=dict(color="#ff7f0e", dash="dot")),
-        row=1, col=1
-    )
-    
-    # الصف السفلي: مؤشر الصحة الهندسية
-    fig_cond.add_trace(
-        go.Scatter(x=df_m3["timestep"], y=df_m3["health_index"], name="Health Index (HI)", line=dict(color="#2ca02c", width=3)),
-        row=2, col=1
-    )
-    # خطوط مستويات التحذير
+    fig_cond.add_trace(go.Scatter(x=df_m3["timestep"], y=df_m3["vibration_rms"], name="Vibration RMS (g)", line=dict(color="#1f77b4", width=2)), row=1, col=1)
+    fig_cond.add_trace(go.Scatter(x=df_m3["timestep"], y=df_m3["temperature_c"], name="Temperature (°C)", line=dict(color="#ff7f0e", dash="dot")), row=1, col=1)
+    fig_cond.add_trace(go.Scatter(x=df_m3["timestep"], y=df_m3["health_index"], name="Health Index (HI)", line=dict(color="#2ca02c", width=3)), row=2, col=1)
     fig_cond.add_hline(y=70, line_dash="dash", line_color="orange", annotation_text="Monitor Threshold (70)", row=2, col=1)
-    fig_cond.add_hline(y=50, line_dash="dash", line_color="red", annotation_text="Degraded Threshold (50)", row=2, col=1)
-
-    fig_cond.update_layout(height=520, margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified")
-    fig_cond.update_xaxes(title_text="Simulation Time (Minutes)", row=2, col=1)
+    fig_cond.add_hline(y=50, line_dash="dash", line_color="red", annotation_text="Maintenance Intervention Threshold (50)", row=2, col=1)
+    fig_cond.update_layout(height=500, margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified")
     st.plotly_chart(fig_cond, use_container_width=True)
 
-# ----------------- Tab 2: Energy & ECI -----------------
-with tab2:
-    fig_energy = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.1,
-        subplot_titles=("Active Power Consumption (kW)", "Energy Condition Indicator (ECI) Deviation")
+# ----------------- Tab 2: Energy Intelligence -----------------
+with t2:
+    fig_e = make_subplots(
+        rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+        subplot_titles=("M3 Active Power vs Expected Power Baseline (kW)", "Context-Aware Energy Condition Indicator (ECI)")
     )
+    fig_e.add_trace(go.Scatter(x=df_m3["timestep"], y=df_m3["power_kw"], name="Actual Power (kW)", line=dict(color="#d62728", width=2)), row=1, col=1)
+    fig_e.add_trace(go.Scatter(x=df_m3["timestep"], y=df_m3["eci"], name="ECI Deviation", line=dict(color="#9467bd", width=2)), row=2, col=1)
+    fig_e.add_hline(y=0.0, line_dash="dash", line_color="gray", annotation_text="Healthy Baseline (0.0)", row=2, col=1)
+    fig_e.update_layout(height=500, margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified")
+    st.plotly_chart(fig_e, use_container_width=True)
+
+# ----------------- Tab 3: Explainable AI -----------------
+with t3:
+    st.subheader("🔍 Explainable AI & Decision Attribution (Why this decision?)")
+    col_x1, col_x2 = st.columns([1, 1])
     
-    fig_energy.add_trace(
-        go.Scatter(x=df_m3["timestep"], y=df_m3["power_kw"], name="Actual Power (kW)", line=dict(color="#d62728", width=2)),
-        row=1, col=1
-    )
-    fig_energy.add_trace(
-        go.Scatter(x=df_m3["timestep"], y=df_m3["eci"], name="ECI Deviation", line=dict(color="#9467bd", width=2)),
-        row=2, col=1
-    )
-    fig_energy.add_hline(y=0.0, line_dash="dash", line_color="gray", annotation_text="Baseline (0.0)", row=2, col=1)
+    with col_x1:
+        st.info(f"""
+        **Active Maintenance Decision Rationale:**
+        * **Target Machine:** M3 Sealer (Thermal/Mechanical Asset)
+        * **Operational Decision:** `{decision_state}`
+        * **Current Health Index:** `{latest_hi:.1f} / 100`
+        * **Persistence Confirmation:** `{'CONFIRMED' if df_m3['confirmed_anomaly'].iloc[-1] == 1 else 'UNCONFIRMED'}`
+        * **Energy Deviation (ECI):** `{latest_eci * 100:+.1f}%`
+        * **Remaining Useful Life (RUL):** `{latest_rul} Minutes`
+        """)
+        
+    with col_x2:
+        attr_df = pd.DataFrame({
+            "Evidence Modality": ["AI Anomaly Score", "Persistence Filter", "Energy Deviation (ECI)", "Thermal/Vibration Physics"],
+            "Attribution (%)": [
+                latest_attr["ai_anomaly"],
+                latest_attr["persistence"],
+                latest_attr["energy_eci"],
+                latest_attr["thermal_vibration"]
+            ]
+        })
+        fig_attr = px.bar(
+            attr_df, x="Evidence Modality", y="Attribution (%)", color="Evidence Modality",
+            title="Relative Sensor & AI Evidence Contribution to HI Penalty",
+            text_auto=".1f"
+        )
+        st.plotly_chart(fig_attr, use_container_width=True)
 
-    fig_energy.update_layout(height=520, margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified")
-    fig_energy.update_xaxes(title_text="Simulation Time (Minutes)", row=2, col=1)
-    st.plotly_chart(fig_energy, use_container_width=True)
-
-# ----------------- Tab 3: Multi-Machine Overview -----------------
-with tab3:
-    fig_all = px.line(
-        df_all, x="timestep", y="power_kw", color="machine_id",
-        title="Active Power Consumption Across All 5 Production Assets",
-        labels={"timestep": "Time (Minutes)", "power_kw": "Power (kW)", "machine_id": "Machine"}
-    )
-    fig_all.update_layout(height=480, margin=dict(l=20, r=20, t=40, b=20))
+# ----------------- Tab 4: 5-Machine Overview -----------------
+with t4:
+    agg_p = df_all.groupby("timestep")["power_kw"].sum().reset_index()
+    fig_agg = px.line(agg_p, x="timestep", y="power_kw", title="Factory-Level Aggregated Power Demand (All 5 Machines)")
+    st.plotly_chart(fig_agg, use_container_width=True)
+    
+    fig_all = px.line(df_all, x="timestep", y="power_kw", color="machine_id", title="Individual Machine Power Profiles")
     st.plotly_chart(fig_all, use_container_width=True)
 
-# ----------------- Tab 4: Policy Benchmark Comparison -----------------
-with tab4:
-    st.subheader("Maintenance Policy & Energy Optimization Benchmark")
+# ----------------- Tab 5: Policy Benchmark -----------------
+with t5:
+    st.subheader("Factory-Level Maintenance Benchmark (5 Synchronized Machines)")
+    sched = ["Product_B"] * config.TOTAL_TIMESTEPS
+    pols = [("CORRECTIVE", False), ("PREVENTIVE", False), ("PREDICTIVE", False), ("PREDICTIVE", True)]
+    b_res = []
     
-    # حساب جدول المقارنة الفوري للسياسات
-    policies = ["CORRECTIVE", "PREVENTIVE", "PREDICTIVE", "PREDICTIVE_PEAK_SHAVING"]
-    benchmark_results = []
-    
-    for pol_name in policies:
-        actual_pol = "PREDICTIVE" if "PREDICTIVE" in pol_name else pol_name
-        sim = PolicySimulator(policy_type=actual_pol)
-        is_ps = (pol_name == "PREDICTIVE_PEAK_SHAVING")
-        deg_level = 0.0
-        powers = []
-        
-        for t in range(config.TOTAL_TIMESTEPS):
-            if not sim.is_under_repair and t >= 60:
-                deg_level = min(0.85, deg_level + (0.85 / (config.TOTAL_TIMESTEPS - 60)))
-            speed_mod = apply_peak_shaving(t) if is_ps else 1.0
-            ai_score = min(1.0, deg_level * 1.3)
-            persistence = 1.0 if deg_level > 0.25 else 0.0
-            eci = deg_level * 0.35
-            temp = 42.0 + (28.0 * deg_level)
-            hi = calculate_health_index(ai_score, persistence, eci, temp)
-            base_p = (config.PRODUCTS[selected_product]["nominal_power_kw"] * (1.0 + 0.35 * deg_level)) * (speed_mod ** 2)
-            base_c = config.PRODUCTS[selected_product]["base_cycle_time"] / speed_mod
-            step_res = sim.step(t, deg_level, hi, base_p, base_c)
-            deg_level = step_res["current_degradation"]
-            powers.append(step_res["power_kw"])
-            
-        oee_res = calculate_oee(config.TOTAL_TIMESTEPS, config.TOTAL_TIMESTEPS - sim.downtime_minutes, config.PRODUCTS[selected_product]["base_cycle_time"], sim.total_units_produced, sim.good_units_produced)
-        eng_res = calculate_energy_kpi(sim.energy_consumed_kwh, sim.good_units_produced, max(powers))
-        
-        benchmark_results.append({
-            "Maintenance Policy": pol_name,
-            "Downtime (min)": sim.downtime_minutes,
-            "Interventions": sim.maintenance_events,
-            "OEE (%)": oee_res["oee_pct"],
-            "Good Units": sim.good_units_produced,
-            "Total Energy (kWh)": eng_res["total_energy_kwh"],
-            "Energy/Unit (Wh)": eng_res["energy_per_unit_wh"]
+    for p_name, p_dr in pols:
+        sim = FactoryPolicySimulator(policy_type=p_name, enable_peak_shaving=p_dr)
+        r = sim.run_policy_benchmark(sched, fault_machine="M3", start_fault_t=fault_start, max_deg=max_deg)
+        b_res.append({
+            "Policy": r["policy"],
+            "Downtime (min)": r["downtime_min"],
+            "Events": r["events"],
+            "OEE (%)": r["oee_pct"],
+            "Good Units": r["good_units"],
+            "Energy (kWh)": r["total_energy_kwh"],
+            "Peak (kW)": r["peak_demand_kw"],
+            "Energy/Unit (Wh)": r["energy_per_unit_wh"],
+            "Total Cost ($)": r["total_cost_usd"],
+            "Carbon (kg)": r["carbon_kg"]
         })
         
-    bench_df = pd.DataFrame(benchmark_results)
-    st.dataframe(bench_df.style.highlight_max(subset=["OEE (%)", "Good Units"], color="#d4edda").highlight_min(subset=["Downtime (min)", "Total Energy (kWh)", "Energy/Unit (Wh)"], color="#d4edda"), use_container_width=True)
+    b_df = pd.DataFrame(b_res)
+    st.dataframe(b_df.style.highlight_max(subset=["OEE (%)", "Good Units"], color="#d4edda").highlight_min(subset=["Downtime (min)", "Total Cost ($)", "Carbon (kg)"], color="#d4edda"), use_container_width=True)
     
-    # رسم بياني للمقارنة
-    col_a, col_b = st.columns(2)
-    with col_a:
-        fig_oee = px.bar(bench_df, x="Maintenance Policy", y="OEE (%)", color="Maintenance Policy", title="Overall Equipment Effectiveness (OEE %)")
+    c_a, c_b = st.columns(2)
+    with c_a:
+        fig_oee = px.bar(b_df, x="Policy", y="OEE (%)", color="Policy", title="Overall Equipment Effectiveness (OEE %)")
         st.plotly_chart(fig_oee, use_container_width=True)
-    with col_b:
-        fig_eng = px.bar(bench_df, x="Maintenance Policy", y="Energy/Unit (Wh)", color="Maintenance Policy", title="Specific Energy Consumption (Wh/unit)")
-        st.plotly_chart(fig_eng, use_container_width=True)
+    with c_b:
+        fig_cost = px.bar(b_df, x="Policy", y="Total Cost ($)", color="Policy", title="Total Operational Cost ($ per Shift)")
+        st.plotly_chart(fig_cost, use_container_width=True)
+
+# ----------------- Tab 6: True Ablation Study -----------------
+with t6:
+    st.subheader("Architectural Layer-by-Layer Ablation Study")
+    ab_df = run_ablation_study(df_m3)
+    st.dataframe(ab_df.style.highlight_max(subset=["Precision", "Recall", "F1-Score", "Early Lead Time (min)"], color="#d4edda").highlight_min(subset=["False Alarms/Hr"], color="#d4edda"), use_container_width=True)
+    
+    fig_f1 = px.bar(ab_df, x="Architecture Layer", y="F1-Score", color="Architecture Layer", title="F1-Score Across System Architectural Layers")
+    st.plotly_chart(fig_f1, use_container_width=True)
+    
