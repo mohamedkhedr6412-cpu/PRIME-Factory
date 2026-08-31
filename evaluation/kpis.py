@@ -1,42 +1,35 @@
 """
-PRIME-Factory KPI Evaluation Engine
-Computes OEE (Availability, Performance, Quality), Downtime, and Energy Efficiency.
+PRIME-Factory KPI Evaluation Engine v3.0
+Fixes P1-1: Computes weighted ideal cycle time for dynamic multi-product schedules.
 """
-import numpy as np
+import config
 
-def calculate_oee(planned_time_min: float, operating_time_min: float, ideal_cycle_sec: float, total_units: int, good_units: int) -> dict:
-    """
-    حساب مؤشر الفاعلية الشاملة للمعدات (OEE):
-    OEE = Availability * Performance * Quality
-    """
-    # 1. التوافرية (Availability)
+def calculate_oee_multiproduct(
+    planned_time_min: float,
+    operating_time_min: float,
+    product_schedule: list,
+    total_units: int,
+    good_units: int
+) -> dict:
     availability = (operating_time_min / planned_time_min) if planned_time_min > 0 else 0.0
     availability = min(1.0, max(0.0, availability))
 
-    # 2. الأداء (Performance)
+    # حساب زمن الدورة المثالي الموزون لسياق المنتجات المشغلة
+    cycle_times = [config.PRODUCTS[p]["base_cycle_time"] for p in product_schedule]
+    weighted_ideal_cycle_sec = sum(cycle_times) / len(cycle_times) if len(cycle_times) > 0 else 1.5
+
     operating_time_sec = operating_time_min * 60.0
-    performance = ((ideal_cycle_sec * total_units) / operating_time_sec) if operating_time_sec > 0 else 0.0
+    performance = ((weighted_ideal_cycle_sec * total_units) / operating_time_sec) if operating_time_sec > 0 else 0.0
     performance = min(1.0, max(0.0, performance))
 
-    # 3. الجودة (Quality)
     quality = (good_units / total_units) if total_units > 0 else 0.0
     quality = min(1.0, max(0.0, quality))
 
-    # الحساب الإجمالي
-    oee = availability * performance * quality
+    oee = availability * performance * quality * 100.0
 
     return {
         "availability_pct": round(availability * 100.0, 2),
         "performance_pct": round(performance * 100.0, 2),
         "quality_pct": round(quality * 100.0, 2),
-        "oee_pct": round(oee * 100.0, 2)
-    }
-
-def calculate_energy_kpi(total_kwh: float, good_units: int, peak_kw: float) -> dict:
-    """حساب مؤشرات كفاءة الطاقة"""
-    kwh_per_unit = (total_kwh / good_units) if good_units > 0 else 0.0
-    return {
-        "total_energy_kwh": round(total_kwh, 2),
-        "peak_demand_kw": round(peak_kw, 2),
-        "energy_per_unit_wh": round(kwh_per_unit * 1000.0, 3)
+        "oee_pct": round(oee, 2)
     }

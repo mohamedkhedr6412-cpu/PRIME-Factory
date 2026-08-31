@@ -1,26 +1,21 @@
 """
-Test 4: Rigorous Factory-Level Policy Benchmark v2.0
-Evaluates Corrective vs Preventive vs Predictive vs Peak Shaving on the 5-machine line.
+Test 4: Scientific Factory-Level Policy Benchmark v3.0
 """
-import config
 import pandas as pd
+import config
 from maintenance.policies import FactoryPolicySimulator
-
-schedule = ["Product_B"] * config.TOTAL_TIMESTEPS
 
 policies = [
     ("CORRECTIVE", False),
     ("PREVENTIVE", False),
     ("PREDICTIVE", False),
-    ("PREDICTIVE", True)  # Predictive + Peak Shaving
+    ("PREDICTIVE", True)
 ]
 
 results = []
-
 for pol_type, is_ps in policies:
     sim = FactoryPolicySimulator(policy_type=pol_type, enable_peak_shaving=is_ps)
-    res = sim.run_policy_benchmark(schedule, fault_machine="M3", start_fault_t=60, max_deg=0.85)
-    
+    res = sim.run_policy_benchmark()
     results.append({
         "Maintenance Policy": res["policy"],
         "Downtime (min)": res["downtime_min"],
@@ -37,7 +32,7 @@ for pol_type, is_ps in policies:
 bench_df = pd.DataFrame(results)
 
 print("\n=========================================================================================================================")
-print("                                 PRIME-FACTORY FACTORY-LEVEL POLICY BENCHMARK RESULTS v2.0                               ")
+print("                             PRIME-FACTORY SCIENTIFIC BENCHMARK RESULTS v3.0 (DECOUPLED & AUDITED)                       ")
 print("=========================================================================================================================")
 print(bench_df.to_string(index=False))
 print("=========================================================================================================================\n")
