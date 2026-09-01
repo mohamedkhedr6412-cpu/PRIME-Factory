@@ -1,6 +1,6 @@
 """
-PRIME-Factory Multi-Fault & Scenario Injection Engine v4.2
-Generates continuous, time-varying degradation profiles shared across policy branches (P0-01).
+PRIME-Factory Multi-Fault & Scenario Injection Engine v6.0
+Generates continuous, time-varying degradation profiles shared across policy branches (Section 12).
 """
 
 import numpy as np

@@ -1,7 +1,7 @@
 """
-PRIME-Factory Machine Model v4.2
+PRIME-Factory Machine Model v6.0
 Simulates physical asset electromechanical behavior, continuous degradation responses,
-calibrated vibration physics (exponent 1.5), thermal lag, and clean state resets (P0-01, P0-07).
+calibrated vibration physics (exponent 1.5), dynamic thermal lag, and clean state resets.
 """
 
 import numpy as np

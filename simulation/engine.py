@@ -1,23 +1,20 @@
 """
-PRIME-Factory Unified Simulation & KPI Engine v4.2
-Single Source of Truth for Live Telemetry, Benchmarks, and What-If Analysis (P0-01, P0-03, P0-08, P0-10).
-"""
-
-"""
-PRIME-Factory Unified Simulation & KPI Engine v4.2
+PRIME-Factory Unified Simulation & KPI Engine v6.0
+Single Source of Truth for Live Telemetry, Benchmarks, and What-If Analysis (Section 3, 11, 16 & 17).
 """
 
 from typing import List, Dict, Any, Optional
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import IsolationForest
+
 import config
 from core.models import ScenarioConfig, SimulationEvent, ResilienceMetrics, SimulationResult
 from simulation.factory import PackagingFactory
 from simulation.faults import (
     generate_degradation_profile,
     generate_friction_profile,
-    generate_electrical_profile,
-    inject_sensor_noise_spikes
+    generate_electrical_profile
 )
 from simulation.state_machine import AssetStateMachine
 from energy.eci import calculate_eci, get_context_expected_power
@@ -26,6 +23,7 @@ from energy.energy_model import calculate_financial_and_esg_impact
 from ai.isolation_forest import PRIMEIsolationForest
 from ai.anomaly import AnomalyProcessor
 from ai.health_index import calculate_health_index_and_evidence, estimate_rolling_rul
+
 class UnifiedSimulationEngine:
     @staticmethod
     def run(scenario: ScenarioConfig) -> SimulationResult:
@@ -43,7 +41,6 @@ class UnifiedSimulationEngine:
         ai_model = PRIMEIsolationForest(contamination=0.02, seed=scenario.seed)
         ai_model.fit(clean_df)
 
-        from sklearn.ensemble import IsolationForest
         context_ai_model = IsolationForest(n_estimators=100, contamination=0.02, random_state=scenario.seed)
         context_ai_model.fit(clean_df[["power_residual", "vibration_rms", "temperature_c"]])
 
@@ -171,7 +168,7 @@ class UnifiedSimulationEngine:
                     alert_triggered_t = t
                     events.append(SimulationEvent(t, "PREDICTIVE_ALERT", "PREDICTIVE", m_id, f"Actionable anomaly detected. HI: {curr_hi:.1f}."))
 
-                # RUL with Quality & Stability Confidence (P1-04)
+                # RUL with Quality & Stability Confidence
                 r_val, r_str = estimate_rolling_rul(hi_histories[m_id], current_state=st_name, current_t=t, window_size=15)
                 rul_conf = 0.95 if st_name in [config.STATE_CRITICAL, config.STATE_PREDICTIVE_ALERT] else 0.70
 
@@ -217,7 +214,7 @@ class UnifiedSimulationEngine:
         fin = calculate_financial_and_esg_impact(total_energy_kwh, downtime_minutes, good_units, avg_pf)
         cost_per_unit = (fin["total_operational_cost_usd"] / good_units) if good_units > 0 else 0.0
 
-        # Resilience Metrics Formulation (P1-08)
+        # Resilience Metrics Formulation
         rec_time = float(recovery_end_t - recovery_start_t) if (recovery_start_t and recovery_end_t) else 15.0
         resilience = ResilienceMetrics(
             recovery_time_min=rec_time,

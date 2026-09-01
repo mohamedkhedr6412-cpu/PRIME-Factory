@@ -1,6 +1,6 @@
 """
-PRIME-Factory Demand Response & Peak Shaving Module v4.2
-Applies motor speed derating to flexible VFD loads during utility peak tariff hours (P1-06).
+PRIME-Factory Demand Response & Peak Shaving Module v6.0
+Applies motor speed derating to flexible VFD loads during utility peak tariff hours (Section 10 & 13).
 """
 
 def apply_peak_shaving(

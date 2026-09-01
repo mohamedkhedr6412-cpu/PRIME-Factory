@@ -1,6 +1,6 @@
 """
-PRIME-Factory Isolation Forest Anomaly Detector v4.2
-Trained exclusively on healthy multi-product baseline data with deterministic seed isolation (P0-09, P1-01).
+PRIME-Factory Isolation Forest Anomaly Detector v6.0
+Trained exclusively on healthy baseline data with deterministic seed isolation (Section 8).
 """
 
 import numpy as np

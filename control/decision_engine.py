@@ -1,6 +1,6 @@
 """
-PRIME-Factory Decision & Explainability Engine v4.2
-Generates operational directives, urgency levels, and Decision Trace cards based on causal evidence (Section 8).
+PRIME-Factory Decision & Explainability Engine v6.0
+Generates operational directives, urgency levels, and Decision Trace cards based on causal evidence (Section 14 & 15).
 """
 
 import config

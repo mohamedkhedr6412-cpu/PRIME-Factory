@@ -1,6 +1,6 @@
 """
-PRIME-Factory Health Index, Evidence Attribution & Trend-Based Rolling RUL Estimator v4.2
-Computes composite HI (0-100), bounded dynamic RUL (P1-04), and normalized modality penalty breakdown.
+PRIME-Factory Health Index, Evidence Attribution & Trend-Based Rolling RUL Estimator v6.0
+Computes composite HI (0-100), bounded dynamic RUL, and normalized modality penalty breakdown (Section 9).
 """
 
 import numpy as np
@@ -47,7 +47,8 @@ def calculate_health_index_and_evidence(
     vib_rms: float
 ) -> dict:
     """
-    Computes composite Health Index (0-100) and normalized penalty attribution across sensor modalities (P1-03).
+    Computes composite Health Index (0-100) and normalized penalty attribution across sensor modalities (Section 9).
+    Weights: alpha=0.30, beta=0.25, gamma=0.25, delta=0.20.
     """
     w = config.HI_WEIGHTS
     

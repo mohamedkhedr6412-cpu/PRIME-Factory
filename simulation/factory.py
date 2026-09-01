@@ -1,5 +1,5 @@
 """
-PRIME-Factory Packaging Line Orchestrator v4.2
+PRIME-Factory Packaging Line Orchestrator v6.0
 Coordinates synchronized multi-machine execution and provides clean state reset hooks.
 """
 

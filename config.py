@@ -1,7 +1,7 @@
 """
-PRIME-Factory Master Configuration File v4.2
+PRIME-Factory Master Configuration File v6.0
 Centralized configuration, parameter taxonomy classification, calibrated physical constants,
-financial inputs, and isolated RNG seeds.
+financial inputs, and isolated RNG seeds (Section 5 & 6).
 """
 
 # ==============================================================================
@@ -11,14 +11,14 @@ TIME_STEP_MINUTES = 1.0
 SHIFT_HOURS = 8
 TOTAL_TIMESTEPS = int(SHIFT_HOURS * 60)  # 480 observation points
 RANDOM_SEED = 42
-RANDOM_SEEDS = [42, 101, 202]  # Multi-seed validation list
+RANDOM_SEEDS = [42, 101, 202]  # Multi-seed stochastic validation list
 
 # ==============================================================================
 # 2. Financial & ESG Operational Assumptions (Engineering Assumptions)
 # ==============================================================================
-ELECTRICITY_TARIFF_PER_KWH = 0.15       # USD per kWh
+ELECTRICITY_TARIFF_PER_KWH = 0.15       # USD per kWh (Standard industrial base tariff)
 DOWNTIME_COST_PER_HOUR = 350.0          # USD per hour of unplanned stoppage
-CARBON_EMISSION_FACTOR = 0.45           # kg CO2 per kWh
+CARBON_EMISSION_FACTOR = 0.45           # kg CO2 per kWh (Grid emissions factor)
 
 # ==============================================================================
 # 3. Power Quality & Grid Parameters (Engineering Assumptions)
@@ -27,7 +27,7 @@ PF_TARGET = 0.90                        # Utility penalty threshold
 PF_ALERT_THRESHOLD = 0.85               # Early electrical warning threshold
 
 # ==============================================================================
-# 4. Calibrated Physical Assets & Bearing Multipliers (Literature-Derived: Bruinsma et al., 2024)
+# 4. Physical Assets & Bearing Multipliers (Literature-Derived: Bruinsma et al., 2024)
 # ==============================================================================
 BEARING_MULTIPLIERS = {
     "BPFO": 3.037,  # Ball Pass Frequency Outer Race
@@ -44,7 +44,7 @@ MACHINES = {
 }
 
 # ==============================================================================
-# 5. Multi-Product Operating Contexts (Engineering Assumptions)
+# 5. Multi-Product Operating Contexts (Simulation Assumptions - Section 5)
 # ==============================================================================
 PRODUCTS = {
     "Product_A": {
@@ -71,7 +71,7 @@ PRODUCTS = {
 }
 
 # ==============================================================================
-# 6. Machine States & Decision Thresholds (Engineering Parameters)
+# 6. Machine States & Decision Thresholds (Section 6)
 # ==============================================================================
 STATE_NORMAL = "NORMAL"
 STATE_DEGRADING = "DEGRADING"
@@ -93,7 +93,7 @@ HI_THRESHOLDS = {
     "CRITICAL": 10.0
 }
 
-# Normalized Health Indicator Penalty Weights (Engineering Parameters, Sum = 1.0)
+# Normalized Health Indicator Penalty Weights (Section 9: Sum = 1.0)
 HI_WEIGHTS = {
     "alpha": 0.30,  # AI Anomaly Score
     "beta": 0.25,   # Persistence Filter Ratio
@@ -101,7 +101,7 @@ HI_WEIGHTS = {
     "delta": 0.20   # Physical Thermal & Vibration Penalty
 }
 
-# Standard Benchmark Scenario Configuration (Isolated Experiment Baseline)
+# Standard Benchmark Scenario Configuration (Section 18)
 BENCHMARK_CONFIG = {
     "fault_machine": "M3",
     "fault_start": 60,

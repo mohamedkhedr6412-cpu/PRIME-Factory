@@ -1,7 +1,7 @@
 """
-PRIME-Factory Canonical 8-State Asset State Machine Engine v4.2
+PRIME-Factory Canonical 8-State Asset State Machine Engine v6.0
 Governs asset operational transitions, predictive alert hysteresis, maintenance duration,
-and post-repair stabilization lifecycles (Section 6 & P0-08).
+and post-repair stabilization lifecycles (Section 6).
 """
 
 import config

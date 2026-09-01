@@ -1,6 +1,6 @@
 """
-PRIME-Factory Persistence Logic & Temporal Filter v4.2
-Rejects transient noise spikes and enforces multi-sample temporal confirmation before alerting (P0-06).
+PRIME-Factory Persistence Logic & Temporal Filter v6.0
+Rejects transient noise spikes and enforces multi-sample temporal confirmation before alerting (Section 6 & 8).
 """
 
 import collections

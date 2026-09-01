@@ -1,7 +1,7 @@
 """
-PRIME-Factory KPI Evaluation Engine v4.2
+PRIME-Factory KPI Evaluation Engine v6.0
 Calculates multi-product weighted OEE, production availability, performance efficiency,
-and quality yield as the single source of truth across all views (P0-03, P1-07).
+and quality yield as the single source of truth across all views (Section 11 & 17).
 """
 
 import config

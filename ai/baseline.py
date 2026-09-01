@@ -1,6 +1,6 @@
 """
-PRIME-Factory Baseline Threshold Detector v4.2
-Conventional static threshold detector for vibration, temperature, ECI, and power factor.
+PRIME-Factory Baseline Threshold Detector v6.0
+Architecture Layer A: Conventional static threshold detector for vibration, temperature, ECI, and PF (Section 8).
 """
 
 import pandas as pd

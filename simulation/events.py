@@ -1,21 +1,11 @@
 """
-PRIME-Factory Event Logging & Audit Trail Engine v4.2
-Maintains structured chronological event traces with causal evidence and state transitions (P1-09).
+PRIME-Factory Event Logging & Audit Trail Engine v6.0
+Maintains structured chronological event traces with causal evidence and state transitions (Section 14).
 """
 
-from dataclasses import dataclass, field
 from typing import List, Dict, Any
 import pandas as pd
-
-@dataclass
-class SimulationEvent:
-    timestep: int
-    event_type: str
-    severity: str
-    machine_id: str
-    message: str
-    evidence: Dict[str, Any] = field(default_factory=dict)
-    recommended_action: str = ""
+from core.models import SimulationEvent
 
 class EventLog:
     def __init__(self):

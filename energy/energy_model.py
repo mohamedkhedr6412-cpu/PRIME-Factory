@@ -1,7 +1,7 @@
 """
-PRIME-Factory Energy & Sustainability Evaluation Engine v4.2
+PRIME-Factory Energy & Sustainability Evaluation Engine v6.0
 Calculates factory-level power demand, electricity costs, downtime stoppage costs,
-power factor penalties, and carbon emissions with isolated financial keys (P0-04, P0-10).
+power factor penalties, and carbon emissions with isolated financial keys (Section 10 & 17).
 """
 
 import pandas as pd
@@ -29,7 +29,7 @@ def calculate_financial_and_esg_impact(
     avg_pf: float = 0.92
 ) -> dict:
     """
-    Computes audited financial KPIs and ESG metrics with strict key separation (P0-04 Fix).
+    Computes audited financial KPIs and ESG metrics with strict parameter labeling (Section 17).
     Total Operational Cost = Energy Cost + Downtime Cost + PF Penalty.
     """
     energy_cost = total_energy_kwh * config.ELECTRICITY_TARIFF_PER_KWH
@@ -41,7 +41,7 @@ def calculate_financial_and_esg_impact(
     total_operational_cost = energy_cost + downtime_cost + pf_penalty
     carbon_emissions_kg = total_energy_kwh * config.CARBON_EMISSION_FACTOR
     
-    # Energy per good unit calculation strictly tied to actual accepted production (P0-10 Fix)
+    # Energy per good unit calculation strictly tied to actual accepted production
     energy_per_unit_wh = (total_energy_kwh / good_units * 1000.0) if good_units > 0 else 0.0
 
     return {

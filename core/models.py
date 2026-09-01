@@ -1,6 +1,6 @@
 """
-PRIME-Factory Canonical Data Models & System Architecture v4.2
-Strictly implements the unified data objects defined in Section 17.
+PRIME-Factory Canonical Data Models & System Architecture v6.0
+Strictly implements the unified data objects defined in Section 3 & 17 of Constitution v6.0.
 """
 
 from dataclasses import dataclass, field

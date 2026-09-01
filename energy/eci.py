@@ -1,6 +1,6 @@
 """
-PRIME-Factory Context-Aware Energy Condition Indicator (ECI) v4.2
-Computes expected nominal power using commanded reference speed to preserve a true uncorrupted baseline (P0-02).
+PRIME-Factory Context-Aware Energy Condition Indicator (ECI) v6.0
+Computes expected nominal power using commanded reference speed to preserve a true uncorrupted baseline (Section 7 & 10).
 """
 
 import config
