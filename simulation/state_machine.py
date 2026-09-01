@@ -1,7 +1,8 @@
 """
-PRIME-Factory State Machine Engine v4.0
-Manages asset operational state transitions, hysteresis, and maintenance lifecycles.
+PRIME-Factory Asset State Machine Engine v4.1
+Governs asset operational transitions, hysteresis, predictive alert levels, and maintenance recovery.
 """
+
 import config
 
 class AssetStateMachine:
@@ -21,37 +22,35 @@ class AssetStateMachine:
         maintenance_duration: int = 15
     ) -> str:
         """
-        تحديث الحالة التشغيلية للماكينة وفق السلسلة السببية:
-        NORMAL -> DEGRADING -> WARNING -> PREDICTIVE_ALERT -> CRITICAL -> FAILURE -> MAINTENANCE -> RECOVERY -> NORMAL
+        Updates machine operational state along the causal sequence:
+        NORMAL -> DEGRADING -> WARNING -> PREDICTIVE_ALERT -> CRITICAL -> FAILED -> MAINTENANCE -> RECOVERY -> NORMAL
         """
-        # 1. حالة الصيانة النشطة
         if in_maintenance:
             self.current_state = config.STATE_MAINTENANCE
             self.repair_timer = maintenance_duration
             self.state_history.append(self.current_state)
             return self.current_state
 
-        # 2. حالة التعافي التدريجي بعد الصيانة
         if self.current_state == config.STATE_MAINTENANCE:
-            self.current_state = "RECOVERY"
-            self.recovery_timer = 15  # 15 دقيقة تعافي فيزيائي تدريجي
+            self.current_state = config.STATE_RECOVERY
+            self.recovery_timer = 15  # 15-minute stabilization period
             self.state_history.append(self.current_state)
             return self.current_state
 
-        if self.current_state == "RECOVERY":
+        if self.current_state == config.STATE_RECOVERY:
             self.recovery_timer -= 1
             if self.recovery_timer <= 0:
                 self.current_state = config.STATE_NORMAL
             self.state_history.append(self.current_state)
             return self.current_state
 
-        # 3. حالات التدهور والأعطال
+        # Dynamic Operational State Assessment
         if degradation >= 0.75:
             self.current_state = config.STATE_FAILED
         elif health_index <= config.HI_THRESHOLDS["CRITICAL"] or degradation >= 0.50:
             self.current_state = config.STATE_CRITICAL
         elif health_index <= config.HI_THRESHOLDS["MONITOR"] and is_confirmed_anomaly:
-            self.current_state = "PREDICTIVE_ALERT"
+            self.current_state = config.STATE_PREDICTIVE_ALERT
         elif health_index <= config.HI_THRESHOLDS["HEALTHY"] or degradation >= 0.15:
             self.current_state = config.STATE_WARNING
         elif degradation > 0.0:
@@ -64,15 +63,47 @@ class AssetStateMachine:
 
     @staticmethod
     def get_state_badge(state: str) -> dict:
+        """Returns visual badge metadata and actionable instructions for UI rendering."""
         badges = {
-            "NORMAL": {"color": "#28a745", "label": "🟢 NORMAL (Healthy)", "action": "Continue Standard Operation"},
-            "DEGRADING": {"color": "#17a2b8", "label": "🔵 DEGRADING (Early Drift)", "action": "Routine Monitoring"},
-            "WARNING": {"color": "#ffc107", "label": "🟡 WARNING (Inspection Needed)", "action": "Elevate Diagnostics"},
-            "PREDICTIVE_ALERT": {"color": "#fd7e14", "label": "🟠 PREDICTIVE ALERT (Actionable)", "action": "Schedule 15-min Maintenance"},
-            "CRITICAL": {"color": "#dc3545", "label": "🔴 CRITICAL (Severe Risk)", "action": "Immediate Controlled Stop / Derate"},
-            "FAILED": {"color": "#6c757d", "label": "⚫ FAILED (Breakdown)", "action": "Emergency Corrective Repair"},
-            "MAINTENANCE": {"color": "#6f42c1", "label": "🟣 MAINTENANCE (Under Repair)", "action": "Repair in Progress"},
-            "RECOVERY": {"color": "#20c997", "label": "🟢 RECOVERY (Post-Repair)", "action": "Stabilizing Physical State"}
+            "NORMAL": {
+                "color": "#28a745", 
+                "label": "NORMAL (Healthy)", 
+                "action": "Continue Standard Operation"
+            },
+            "DEGRADING": {
+                "color": "#17a2b8", 
+                "label": "DEGRADING (Early Drift)", 
+                "action": "Routine Monitoring"
+            },
+            "WARNING": {
+                "color": "#ffc107", 
+                "label": "WARNING (Inspection Needed)", 
+                "action": "Elevate Diagnostics"
+            },
+            "PREDICTIVE_ALERT": {
+                "color": "#fd7e14", 
+                "label": "PREDICTIVE ALERT (Actionable)", 
+                "action": "Schedule 15-min Intervention"
+            },
+            "CRITICAL": {
+                "color": "#dc3545", 
+                "label": "CRITICAL (Severe Risk)", 
+                "action": "Immediate Controlled Stop / Derate"
+            },
+            "FAILED": {
+                "color": "#6c757d", 
+                "label": "FAILED (Breakdown)", 
+                "action": "Emergency Corrective Repair"
+            },
+            "MAINTENANCE": {
+                "color": "#6f42c1", 
+                "label": "MAINTENANCE (Under Repair)", 
+                "action": "Repair In Progress"
+            },
+            "RECOVERY": {
+                "color": "#20c997", 
+                "label": "RECOVERY (Post-Repair)", 
+                "action": "Stabilizing Phase"
+            }
         }
         return badges.get(state, badges["NORMAL"])
-    

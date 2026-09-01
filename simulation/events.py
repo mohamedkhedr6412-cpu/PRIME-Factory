@@ -1,16 +1,17 @@
 """
-PRIME-Factory Event Logging & Audit Trail Engine v4.0
-Maintains a structured, chronological record of all simulation, detector, and maintenance events.
+PRIME-Factory Event Logging & Audit Trail Engine v4.1
+Maintains structured chronological event traces with causal evidence and state transitions.
 """
+
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import List, Dict, Any
+import pandas as pd
 
 @dataclass
 class SimulationEvent:
     timestep: int
-    event_type: str        # FAULT_INJECTED, ANOMALY_DETECTED, PREDICTIVE_ALERT, MAINTENANCE_EXECUTED, etc.
-    severity: str          # INFO, WARNING, PREDICTIVE, CRITICAL, FAILURE
+    event_type: str
+    severity: str
     machine_id: str
     message: str
     evidence: Dict[str, Any] = field(default_factory=dict)
@@ -41,11 +42,11 @@ class EventLog:
         )
         self.events.append(event)
 
-    def get_events_as_dataframe(self):
-        import pandas as pd
+    def get_events_as_dataframe(self) -> pd.DataFrame:
         if not self.events:
-            return pd.DataFrame(columns=["Timestep (min)", "Severity", "Machine", "Event Type", "Message", "Recommended Action"])
-        
+            return pd.DataFrame(columns=[
+                "Timestep (min)", "Severity", "Machine", "Event Type", "Message", "Recommended Action"
+            ])
         return pd.DataFrame([
             {
                 "Timestep (min)": e.timestep,
@@ -60,4 +61,3 @@ class EventLog:
 
     def clear(self):
         self.events.clear()
-        

@@ -1,7 +1,8 @@
 """
-PRIME-Factory Persistence Logic & Context-Aware Anomaly Processor
-Filters transient spikes using a sliding window: P_t = (1/N) * Sum(I_{t-k})
+PRIME-Factory Persistence Logic & Temporal Filter v4.1
+Prevents nuisance alarms from single transient spikes using sliding confirmation windows.
 """
+
 import collections
 import config
 
@@ -11,15 +12,12 @@ class AnomalyProcessor:
         self.history = collections.deque(maxlen=window_size)
 
     def update(self, raw_anomaly_score: float, threshold: float = 0.5) -> dict:
-        """
-        تحديث نافذة الاستمرارية لحساب نسبة استمرار الشذوذ
-        """
+        """Updates the temporal persistence buffer with the latest anomaly score."""
         is_anomaly = 1.0 if raw_anomaly_score > threshold else 0.0
         self.history.append(is_anomaly)
         
-        # حساب نسبة العينات الشاذة المتتالية (Persistence Ratio)
         persistence_ratio = sum(self.history) / float(self.window_size)
-        is_confirmed = 1 if len(self.history) == self.window_size and persistence_ratio >= 0.8 else 0
+        is_confirmed = 1 if (len(self.history) == self.window_size and persistence_ratio >= 0.8) else 0
         
         return {
             "is_raw_anomaly": int(is_anomaly),
@@ -29,4 +27,3 @@ class AnomalyProcessor:
 
     def reset(self):
         self.history.clear()
-        

@@ -1,12 +1,13 @@
 """
-PRIME-Factory Scenario & Multi-Fault Injection Engine v4.0
-Supports bearing wear, mechanical friction, electrical anomalies, and sensor noise stress-testing.
+PRIME-Factory Multi-Fault & Scenario Injection Engine v4.1
+Generates continuous degradation profiles (P0-01 Fix) and handles sensor noise stress tests.
 """
+
 import numpy as np
 import config
 
-def generate_degradation_profile(total_timesteps: int, start_time: int, max_degradation: float = 0.45) -> list:
-    """توليد تآكل ميكانيكي تدريجي في المحامل (Bearing Wear Dynamics)"""
+def generate_degradation_profile(total_timesteps: int, start_time: int, max_degradation: float = 0.85) -> list:
+    """Generates continuous mechanical bearing wear degradation profile."""
     profile = np.zeros(total_timesteps)
     if start_time < total_timesteps:
         duration = total_timesteps - start_time
@@ -14,7 +15,7 @@ def generate_degradation_profile(total_timesteps: int, start_time: int, max_degr
     return profile.tolist()
 
 def generate_friction_profile(total_timesteps: int, start_time: int, max_friction: float = 0.40) -> list:
-    """توليد احتكاك ميكانيكي / جفاف تزييت (Mechanical Friction / Belt Resistance)"""
+    """Generates progressive mechanical friction / conveyor belt resistance profile."""
     profile = np.zeros(total_timesteps)
     if start_time < total_timesteps:
         duration = total_timesteps - start_time
@@ -22,7 +23,7 @@ def generate_friction_profile(total_timesteps: int, start_time: int, max_frictio
     return profile.tolist()
 
 def generate_electrical_profile(total_timesteps: int, start_time: int, max_severity: float = 0.40) -> list:
-    """توليد خلل كهربائي / انخفاض معامل القدرة (Electrical Insulation Degradation)"""
+    """Generates stator winding degradation and power factor drop profile."""
     profile = np.zeros(total_timesteps)
     if start_time < total_timesteps:
         duration = total_timesteps - start_time
@@ -30,7 +31,7 @@ def generate_electrical_profile(total_timesteps: int, start_time: int, max_sever
     return profile.tolist()
 
 def generate_switching_schedule(total_timesteps: int) -> list:
-    """توليد جدول تبديل منتجات طبيعي (Product A -> B -> C)"""
+    """Generates dynamic multi-product switching schedule: Product_A -> Product_B -> Product_C."""
     schedule = []
     interval = total_timesteps // 3
     for t in range(total_timesteps):
@@ -42,11 +43,18 @@ def generate_switching_schedule(total_timesteps: int) -> list:
             schedule.append("Product_C")
     return schedule
 
-def inject_sensor_noise_spikes(values: np.ndarray, spike_probability: float = 0.03, noise_magnitude: float = 2.0) -> np.ndarray:
-    """محاكاة تشويش الحساسات اللحظي (Chaos Stress-Testing)"""
+def inject_sensor_noise_spikes(
+    values: np.ndarray, 
+    spike_probability: float = 0.03, 
+    noise_magnitude: float = 2.5,
+    rng: np.random.RandomState = None
+) -> np.ndarray:
+    """Simulates transient electromagnetic interference and sensor spikes for chaos testing."""
+    if rng is None:
+        rng = np.random.RandomState()
     noisy_values = values.copy()
     num_spikes = int(len(values) * spike_probability)
-    spike_indices = np.random.choice(len(values), num_spikes, replace=False)
+    spike_indices = rng.choice(len(values), num_spikes, replace=False)
     for idx in spike_indices:
-        noisy_values[idx] += np.random.uniform(1.5, noise_magnitude)
+        noisy_values[idx] += rng.uniform(1.2, noise_magnitude)
     return noisy_values
