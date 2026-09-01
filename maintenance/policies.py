@@ -1,6 +1,6 @@
 """
-PRIME-Factory Factory-Level Maintenance Simulator v3.0
-Fixes C1 & C8: Completely decoupled from UI sliders, guarantees failure reachability for Corrective policy.
+PRIME-Factory Maintenance Policies & What-If Engine v4.0
+Supports scientific benchmarks, interactive intervention execution, and live What-If dual-branch comparisons.
 """
 import numpy as np
 import pandas as pd
@@ -102,7 +102,6 @@ class FactoryPolicySimulator:
             trigger_repair = False
             duration = 0
             
-            # Corrective Policy: إصلاح إجباري عند حدوث الانهيار الفعلي (>= 0.75)
             if self.policy_type == "CORRECTIVE":
                 if current_deg >= 0.75:
                     trigger_repair = True
@@ -152,3 +151,39 @@ class FactoryPolicySimulator:
             "carbon_kg": fin_impact["carbon_kg"],
             "telemetry_df": res_df
         }
+
+    @staticmethod
+    def run_what_if_analysis(product_schedule: list, fault_start_t: int = 120, max_deg: float = 0.85) -> dict:
+        """
+        مقارنة مزدوجة متزامنة لنفس السيناريو (Dual-Branch What-If Comparison):
+        المسار (أ): التدخل التنبؤي الاستباقي (Predictive Intervention)
+        المسار (ب): عدم التدخل / الانتظار حتى الانهيار الحرج (No Intervention / Corrective)
+        """
+        sim_pred = FactoryPolicySimulator(policy_type="PREDICTIVE")
+        res_pred = sim_pred.run_policy_benchmark({
+            "product_schedule": product_schedule,
+            "fault_machine": "M3",
+            "fault_start": fault_start_t,
+            "max_degradation": max_deg
+        })
+
+        sim_corr = FactoryPolicySimulator(policy_type="CORRECTIVE")
+        res_corr = sim_corr.run_policy_benchmark({
+            "product_schedule": product_schedule,
+            "fault_machine": "M3",
+            "fault_start": fault_start_t,
+            "max_degradation": max_deg
+        })
+
+        return {
+            "predictive": res_pred,
+            "no_intervention": res_corr,
+            "savings": {
+                "downtime_saved_min": res_corr["downtime_min"] - res_pred["downtime_min"],
+                "cost_saved_usd": round(res_corr["total_cost_usd"] - res_pred["total_cost_usd"], 2),
+                "carbon_saved_kg": round(res_corr["carbon_kg"] - res_pred["carbon_kg"], 2),
+                "oee_gain_pct": round(res_pred["oee_pct"] - res_corr["oee_pct"], 2),
+                "extra_good_units": res_pred["good_units"] - res_corr["good_units"]
+            }
+        }
+    

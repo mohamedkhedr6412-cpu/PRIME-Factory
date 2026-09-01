@@ -1,36 +1,32 @@
 """
-PRIME-Factory Health Index, Attribution (XAI) & Rolling RUL Estimator v3.0
-Fixes C4 & C7: Implements a 15-minute rolling linear regression for RUL and eliminates fake fallbacks.
+PRIME-Factory Health Index, Attribution & Rolling RUL Estimator v4.0
 """
 import numpy as np
 import config
 
 def estimate_rolling_rul(hi_history: list, window_size: int = 15) -> tuple:
     """
-    تقدير العمر التشغيلي المتبقي (RUL) عبر الانحدار الخطي المتحرك لآخر 15 دقيقة:
-    RUL = (HI_current - HI_critical) / |slope|
+    تقدير العمر التشغيلي المتبقي بصياغة مقتضبة تناسب بطاقات العرض
     """
     if len(hi_history) < window_size:
-        return None, "RUL Not Established (Insufficient History)"
+        return None, "Initializing..."
     
     recent_hi = np.array(hi_history[-window_size:])
     current_hi = recent_hi[-1]
     
     if current_hi >= config.HI_THRESHOLDS["HEALTHY"]:
-        return None, "RUL Not Established (Stable Baseline)"
+        return None, "Stable (Healthy)"
     
     x = np.arange(window_size)
-    # حساب ميل الانحدار الخطي
     slope, _ = np.polyfit(x, recent_hi, 1)
     
-    # إذا كان الانحدار سلبياً ومستمراً (تدهور فعلي)
     if slope < -0.02 and current_hi > config.HI_THRESHOLDS["CRITICAL"]:
         rul_minutes = int((current_hi - config.HI_THRESHOLDS["CRITICAL"]) / abs(slope))
-        return max(0, rul_minutes), f"{rul_minutes} min (Trend-Based)"
+        return max(0, rul_minutes), f"{rul_minutes} min"
     elif current_hi <= config.HI_THRESHOLDS["CRITICAL"]:
-        return 0, "0 min (Critical Failure Reached)"
+        return 0, "0 min (Critical)"
     else:
-        return None, "RUL Not Established (Stable State)"
+        return None, "Stable"
 
 def calculate_health_index_and_evidence(
     anomaly_score: float,
@@ -53,7 +49,6 @@ def calculate_health_index_and_evidence(
     hi = config.HEALTH_INDEX_MAX - (total_penalty * 100.0)
     hi = round(float(max(config.HEALTH_INDEX_MIN, min(config.HEALTH_INDEX_MAX, hi))), 2)
     
-    # تسمية علمية دقيقة لمساهمات الحساسات (Normalized HI Penalty Contribution)
     if total_penalty > 1e-4:
         attr_ai = round((score_contrib / total_penalty) * 100.0, 1)
         attr_pers = round((persistence_contrib / total_penalty) * 100.0, 1)
@@ -81,4 +76,4 @@ def map_hi_to_decision(hi: float) -> str:
         return "PLAN_MAINTENANCE (Schedule 15-min Intervention)"
     else:
         return "CRITICAL (Immediate Controlled Stop / Derate)"
-        
+    
