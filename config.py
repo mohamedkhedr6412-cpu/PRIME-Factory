@@ -11,14 +11,14 @@ TIME_STEP_MINUTES = 1.0
 SHIFT_HOURS = 8
 TOTAL_TIMESTEPS = int(SHIFT_HOURS * 60)  # 480 observation points
 RANDOM_SEED = 42
-RANDOM_SEEDS = [42, 101, 202]  # Multi-seed stochastic validation list
+RANDOM_SEEDS = [42, 101, 202]  # Multi-seed validation list
 
 # ==============================================================================
 # 2. Financial & ESG Operational Assumptions (Engineering Assumptions)
 # ==============================================================================
-ELECTRICITY_TARIFF_PER_KWH = 0.15       # USD per kWh (Standard industrial base tariff)
+ELECTRICITY_TARIFF_PER_KWH = 0.15       # USD per kWh
 DOWNTIME_COST_PER_HOUR = 350.0          # USD per hour of unplanned stoppage
-CARBON_EMISSION_FACTOR = 0.45           # kg CO2 per kWh (Grid grid emissions factor)
+CARBON_EMISSION_FACTOR = 0.45           # kg CO2 per kWh
 
 # ==============================================================================
 # 3. Power Quality & Grid Parameters (Engineering Assumptions)
