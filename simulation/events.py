@@ -1,6 +1,6 @@
 """
-PRIME-Factory Event Logging & Audit Trail Engine v4.1
-Maintains structured chronological event traces with causal evidence and state transitions.
+PRIME-Factory Event Logging & Audit Trail Engine v4.2
+Maintains structured chronological event traces with causal evidence and state transitions (P1-09).
 """
 
 from dataclasses import dataclass, field
@@ -31,6 +31,7 @@ class EventLog:
         evidence: Dict[str, Any] = None,
         recommended_action: str = ""
     ):
+        """Appends a timestamped operational event to the immutable audit trail."""
         event = SimulationEvent(
             timestep=timestep,
             event_type=event_type,
@@ -43,6 +44,7 @@ class EventLog:
         self.events.append(event)
 
     def get_events_as_dataframe(self) -> pd.DataFrame:
+        """Exports the event log into a structured DataFrame for UI and CSV export."""
         if not self.events:
             return pd.DataFrame(columns=[
                 "Timestep (min)", "Severity", "Machine", "Event Type", "Message", "Recommended Action"
@@ -60,4 +62,5 @@ class EventLog:
         ])
 
     def clear(self):
+        """Clears all logged events upon simulation reset."""
         self.events.clear()

@@ -1,6 +1,7 @@
 """
-PRIME-Factory Asset State Machine Engine v4.1
-Governs asset operational transitions, hysteresis, predictive alert levels, and maintenance recovery.
+PRIME-Factory Canonical 8-State Asset State Machine Engine v4.2
+Governs asset operational transitions, predictive alert hysteresis, maintenance duration,
+and post-repair stabilization lifecycles (Section 6 & P0-08).
 """
 
 import config
@@ -22,7 +23,7 @@ class AssetStateMachine:
         maintenance_duration: int = 15
     ) -> str:
         """
-        Updates machine operational state along the causal sequence:
+        Updates machine operational state along the canonical causal chain:
         NORMAL -> DEGRADING -> WARNING -> PREDICTIVE_ALERT -> CRITICAL -> FAILED -> MAINTENANCE -> RECOVERY -> NORMAL
         """
         if in_maintenance:
@@ -33,7 +34,7 @@ class AssetStateMachine:
 
         if self.current_state == config.STATE_MAINTENANCE:
             self.current_state = config.STATE_RECOVERY
-            self.recovery_timer = 15  # 15-minute stabilization period
+            self.recovery_timer = 15  # 15-minute physical stabilization phase
             self.state_history.append(self.current_state)
             return self.current_state
 
@@ -44,7 +45,7 @@ class AssetStateMachine:
             self.state_history.append(self.current_state)
             return self.current_state
 
-        # Dynamic Operational State Assessment
+        # Continuous Dynamic Condition Evaluation
         if degradation >= 0.75:
             self.current_state = config.STATE_FAILED
         elif health_index <= config.HI_THRESHOLDS["CRITICAL"] or degradation >= 0.50:
@@ -63,7 +64,7 @@ class AssetStateMachine:
 
     @staticmethod
     def get_state_badge(state: str) -> dict:
-        """Returns visual badge metadata and actionable instructions for UI rendering."""
+        """Returns color badges and direct operational directives for dashboard rendering."""
         badges = {
             "NORMAL": {
                 "color": "#28a745", 

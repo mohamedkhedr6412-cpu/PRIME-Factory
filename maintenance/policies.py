@@ -1,6 +1,7 @@
 """
-PRIME-Factory Maintenance Policies & Dual-Branch What-If Engine v4.1
-Supports isolated benchmarks, deterministic What-If analysis, and causal intervention lifecycles.
+PRIME-Factory Maintenance Policies & Dual-Branch What-If Engine v4.2
+Supports isolated benchmarks, deterministic What-If analysis, causal intervention lifecycles,
+and industrial resilience metrics (P0-01, P0-02, P0-07, P0-08, P1-08).
 """
 
 import numpy as np
@@ -85,7 +86,7 @@ class FactoryPolicySimulator:
 
                 rec = m.step(prod_key, dt_minutes=config.TIME_STEP_MINUTES, rng=rng)
                 
-                # Corrected Demand Response Power Scaling (P0-02 Fix)
+                # Demand Response Power Scaling (P0-02 Fix)
                 if self.enable_peak_shaving and speed_mod < 1.0:
                     rec["power_kw"] = round(rec["power_kw"] * (speed_mod ** 2.0), 3)
 
@@ -108,7 +109,7 @@ class FactoryPolicySimulator:
             )
             current_hi = hi_info["health_index"]
 
-            # Maintenance Decision Logic & Realistic Durations
+            # Maintenance Decision Logic & Realistic Stoppage Times
             trigger_repair = False
             duration = 0
 
@@ -175,7 +176,7 @@ class FactoryPolicySimulator:
     ) -> dict:
         """
         Runs dual-branch What-If analysis comparing Predictive intervention vs Corrective breakdown
-        under identical exogenous random seeds and degradation profiles (P0-07 Fix).
+        under identical exogenous random seeds and degradation profiles (P0-07, P1-08).
         """
         cfg_whatif = {
             "product_schedule": product_schedule,

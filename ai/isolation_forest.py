@@ -1,6 +1,6 @@
 """
-PRIME-Factory Isolation Forest Anomaly Detector v4.1
-Trained exclusively on healthy multi-product baseline data with deterministic seed isolation.
+PRIME-Factory Isolation Forest Anomaly Detector v4.2
+Trained exclusively on healthy multi-product baseline data with deterministic seed isolation (P0-09, P1-01).
 """
 
 import numpy as np
@@ -19,7 +19,7 @@ class PRIMEIsolationForest:
         self.is_fitted = False
 
     def fit(self, healthy_df: pd.DataFrame):
-        """Fits the anomaly detector on verified healthy data."""
+        """Fits the anomaly detector strictly on verified healthy baseline data."""
         X = healthy_df[self.feature_cols].copy()
         self.model.fit(X)
         self.is_fitted = True

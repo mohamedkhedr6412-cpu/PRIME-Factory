@@ -1,7 +1,7 @@
 """
-PRIME-Factory Interactive Industrial Control & Decision Center v4.1 (Master Edition)
+PRIME-Factory Interactive Industrial Control & Decision Center v4.2 (Master Edition)
 Features: Multi-Product Contexts, Physical Telemetry, XAI Decision Trace, Deterministic What-If,
-Causal PdM Execution, Calibrated Ablation, and Experiment Audit Trail.
+Causal PdM Execution Lifecycle, Calibrated Ablation, and Experiment Audit Trail (Section 5 & P0-08).
 """
 
 import sys
@@ -36,7 +36,7 @@ from maintenance.policies import FactoryPolicySimulator
 from evaluation.ablation import run_ablation_study
 
 st.set_page_config(
-    page_title="PRIME-Factory | Control & Decision Center v4.1",
+    page_title="PRIME-Factory | Control & Decision Center v4.2",
     layout="wide",
     page_icon="🏭"
 )
@@ -47,10 +47,7 @@ st.set_page_config(
 if "manual_maintenance_triggered" not in st.session_state:
     st.session_state.manual_maintenance_triggered = False
 
-if "guided_demo_step" not in st.session_state:
-    st.session_state.guided_demo_step = 0
-
-st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v4.1")
+st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v4.2")
 st.caption("National Competition for AI and Robotics (RoboDam 2026) | Team MSA")
 
 # ---------------------------------------------------------
@@ -122,7 +119,7 @@ def run_master_pipeline(mode, prod_key, target_m, f_type, fault_enabled, start_t
         schedule = generate_switching_schedule(config.TOTAL_TIMESTEPS)
         event_log.add_event(0, "RECIPE_SCHEDULED", "INFO", "ALL", "Dynamic Multi-Product Switching Recipe (A -> B -> C) activated.")
 
-    # 1. Fault Profile Synthesis
+    # 1. Continuous Degradation Profile Synthesis
     degradation_plan = None
     if fault_enabled:
         if "Bearing" in f_type:
@@ -145,7 +142,7 @@ def run_master_pipeline(mode, prod_key, target_m, f_type, fault_enabled, start_t
         df.loc[df["machine_id"] == target_m, "vibration_rms"] = inject_sensor_noise_spikes(vib_vals, spike_probability=0.03, noise_magnitude=2.5)
         event_log.add_event(10, "CHAOS_INJECTED", "WARNING", target_m, "Transient electromagnetic noise spikes injected into sensor telemetry.")
 
-    # 3. AI Training on Isolated Clean Baseline
+    # 3. AI Baseline Training on Clean State
     factory.reset_factory()
     healthy_training_df = factory.run_simulation(schedule, seed=config.RANDOM_SEED)
     
@@ -168,7 +165,7 @@ def run_master_pipeline(mode, prod_key, target_m, f_type, fault_enabled, start_t
     c_raw_scores = c_model.decision_function(test_context_feat)
     df["context_ai_score"] = np.round(1.0 / (1.0 + np.exp(c_raw_scores * 5.0)), 4)
 
-    # 4. Target Machine Telemetry Processing & Decision Flow
+    # 4. Target Machine Processing & Causal Lifecycle
     target_df = df[df["machine_id"] == target_m].copy()
     processor = AnomalyProcessor(window_size=config.PERSISTENCE_WINDOW)
     state_machine = AssetStateMachine(machine_id=target_m)
@@ -248,7 +245,7 @@ df_target_view = df_target[df_target["timestep"] <= time_scrubber].copy()
 df_all_view = df_all[df_all["timestep"] <= time_scrubber].copy()
 
 # ---------------------------------------------------------
-# Header: Live Factory KPIs
+# Header: Live Factory KPIs (Single Source of Truth)
 # ---------------------------------------------------------
 total_energy = calculate_total_energy_kwh(df_all_view)
 peak_kw = calculate_peak_demand_kw(df_all_view)
@@ -270,7 +267,7 @@ kpi3.metric(f"🛡️ {selected_machine} Health Index", f"{latest_hi:.1f} / 100"
 kpi4.metric("⏳ Estimated RUL", latest_rul_str)
 kpi5.metric("💰 Shift Operational Cost", f"${fin_metrics['total_operational_cost_usd']:.1f}", delta=f"{fin_metrics['carbon_kg']:.1f} kg CO2", delta_color="inverse")
 
-# Alert Banner Routing (Corrected Colors)
+# Alert Banner Routing (Canonical System Colors)
 if display_state in [config.STATE_CRITICAL, config.STATE_FAILED]:
     st.error(f"🚨 **{decision['title']}** | **Machine:** {selected_machine} ({config.MACHINES[selected_machine]['name']}) | **Action:** {decision['recommended_action']}")
 elif display_state in [config.STATE_PREDICTIVE_ALERT, config.STATE_WARNING]:
@@ -448,7 +445,7 @@ with t_ablation:
 
 # Tab 7: Experiment Report & Evidence Export
 with t_report:
-    st.subheader("📑 Formal Experiment & Evidence Summary (v4.1)")
+    st.subheader("📑 Formal Experiment & Evidence Summary (v4.2)")
     rep_col1, rep_col2 = st.columns(2)
     with rep_col1:
         st.write("#### Experiment Parameters & Metadata")
@@ -460,7 +457,7 @@ with t_report:
             "Fault_Onset_Minute": fault_start if inject_fault else "N/A",
             "Max_Degradation_Severity": f"{max_deg*100:.1f}%" if inject_fault else "0.0%",
             "Random_Seed": config.RANDOM_SEED,
-            "Software_Version": "PRIME-Factory v4.1 Master Edition"
+            "Software_Version": "PRIME-Factory v4.2 Master Edition"
         })
     with rep_col2:
         st.write("#### Achieved Operational Outcomes")

@@ -1,6 +1,7 @@
 """
-PRIME-Factory Machine Model v4.1
-Includes non-linear bearing wear physics, dynamic thermal lag, and isolated state resets.
+PRIME-Factory Machine Model v4.2
+Simulates physical asset electromechanical behavior, continuous degradation responses,
+calibrated vibration physics (exponent 1.5), thermal lag, and clean state resets (P0-01, P0-07).
 """
 
 import numpy as np
@@ -20,19 +21,19 @@ class Machine:
         self.reset()
 
     def reset(self):
-        """Resets dynamic internal state to eliminate training/simulation state leakage."""
+        """Resets all dynamic internal variables to eliminate state leakage across runs."""
         self.state = config.STATE_NORMAL
         self.degradation_level = 0.0
         self.current_temp = self.base_temp_c
 
     def step(self, product_key: str, dt_minutes: float = 1.0, rng: np.random.RandomState = None) -> dict:
-        """Executes one simulation timestep with isolated random state."""
+        """Executes one discrete simulation timestep using an isolated RNG stream."""
         if rng is None:
             rng = np.random.RandomState()
 
         prod = config.PRODUCTS[product_key]
         
-        # 1. Kinematic & Power Calculations
+        # 1. Kinematic Speed & Electrical Power
         speed_rpm = 1500.0 * prod["speed_factor"] * (1.0 - 0.05 * self.degradation_level)
         load_kw = self.nominal_kw * prod["load_factor"]
         power_penalty = load_kw * (0.35 * self.degradation_level)
@@ -43,7 +44,7 @@ class Machine:
         pf = max(0.65, 0.88 - 0.08 * self.degradation_level)
         actual_current_a = (actual_power_kw * 1000.0) / (np.sqrt(3.0) * self.voltage_v * pf)
         
-        # 3. Dynamic Thermal Lag (tau = 15 min)
+        # 3. Dynamic Thermal Lag (tau = 15.0 min)
         target_temp = self.base_temp_c + (28.0 * self.degradation_level) + (prod["load_factor"] * 4.0)
         thermal_tau = 15.0
         temp_drift = (target_temp - self.current_temp) * (dt_minutes / thermal_tau)
@@ -57,7 +58,7 @@ class Machine:
         else:
             vib_rms = 0.0
             
-        # 5. Internal Physical State Mapping
+        # 5. Internal Physical State Lifecycle
         if self.degradation_level >= 0.75:
             self.state = config.STATE_FAILED
         elif self.degradation_level >= 0.50:

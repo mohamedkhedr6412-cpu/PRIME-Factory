@@ -1,7 +1,7 @@
 """
-PRIME-Factory Architectural Ablation Study Module v4.1
-Evaluates incremental value across all 6 detector layers (including Autoencoder)
-with mathematically verified F1 identities and explicit lead-time metrics (P0-05 & P0-06 Fixes).
+PRIME-Factory Architectural Ablation Study Module v4.2
+Evaluates incremental value across all 6 detector layers (including Dense Autoencoder)
+with mathematically verified F1 identities and explicit timing metrics (P0-05, P0-06).
 """
 
 import pandas as pd

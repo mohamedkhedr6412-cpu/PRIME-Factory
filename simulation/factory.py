@@ -1,6 +1,6 @@
 """
-PRIME-Factory Packaging Line Orchestrator v4.1
-Manages synchronous multi-machine execution, recipe schedules, and factory state resets.
+PRIME-Factory Packaging Line Orchestrator v4.2
+Coordinates synchronized multi-machine execution and provides clean state reset hooks.
 """
 
 import pandas as pd
@@ -21,19 +21,19 @@ class PackagingFactory:
         ]
 
     def reset_factory(self):
-        """Resets all machines in the line to initial clean states."""
+        """Resets all 5 machines in the line to initial healthy baselines."""
         for m in self.machines:
             m.reset()
 
     def reset_machine(self, machine_id: str):
-        """Resets a single target machine after maintenance completion."""
+        """Resets a single target machine following completed maintenance recovery."""
         for m in self.machines:
             if m.machine_id == machine_id:
                 m.reset()
                 break
 
     def run_simulation(self, product_schedule: list, degradation_targets: dict = None, seed: int = config.RANDOM_SEED) -> pd.DataFrame:
-        """Runs synchronized factory production over the schedule horizon."""
+        """Runs synchronized factory production over the schedule horizon using isolated RNG."""
         rng = np.random.RandomState(seed)
         records = []
         timesteps = len(product_schedule)

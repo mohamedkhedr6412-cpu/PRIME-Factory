@@ -1,25 +1,34 @@
 """
-PRIME-Factory Master Configuration File v4.1
-Centralized configuration, calibrated physical constants, financial inputs, and RNG seeds.
+PRIME-Factory Master Configuration File v4.2
+Centralized configuration, parameter taxonomy classification, calibrated physical constants,
+financial inputs, and isolated RNG seeds.
 """
 
-# Simulation Run Settings & Time Horizons
+# ==============================================================================
+# 1. Simulation Run Settings & Time Horizons (Simulation-Control Parameters)
+# ==============================================================================
 TIME_STEP_MINUTES = 1.0
 SHIFT_HOURS = 8
 TOTAL_TIMESTEPS = int(SHIFT_HOURS * 60)  # 480 observation points
 RANDOM_SEED = 42
-RANDOM_SEEDS = [42, 101, 202]  # For multi-seed stochastic validation
+RANDOM_SEEDS = [42, 101, 202]  # Multi-seed stochastic validation list
 
-# Financial & ESG Operational Assumptions
-ELECTRICITY_TARIFF_PER_KWH = 0.15       # USD per kWh
-DOWNTIME_COST_PER_HOUR = 350.0          # USD per hour of unplanned line stoppage
-CARBON_EMISSION_FACTOR = 0.45           # kg CO2 per kWh
+# ==============================================================================
+# 2. Financial & ESG Operational Assumptions (Engineering Assumptions)
+# ==============================================================================
+ELECTRICITY_TARIFF_PER_KWH = 0.15       # USD per kWh (Standard industrial base tariff)
+DOWNTIME_COST_PER_HOUR = 350.0          # USD per hour of unplanned stoppage
+CARBON_EMISSION_FACTOR = 0.45           # kg CO2 per kWh (Grid grid emissions factor)
 
-# Power Quality & Grid Parameters
+# ==============================================================================
+# 3. Power Quality & Grid Parameters (Engineering Assumptions)
+# ==============================================================================
 PF_TARGET = 0.90                        # Utility penalty threshold
 PF_ALERT_THRESHOLD = 0.85               # Early electrical warning threshold
 
-# Physical Asset Specifications & Bearing Multipliers (Bruinsma et al., 2024)
+# ==============================================================================
+# 4. Calibrated Physical Assets & Bearing Multipliers (Literature-Derived: Bruinsma et al., 2024)
+# ==============================================================================
 BEARING_MULTIPLIERS = {
     "BPFO": 3.037,  # Ball Pass Frequency Outer Race
     "BPFI": 4.963,  # Ball Pass Frequency Inner Race
@@ -34,7 +43,9 @@ MACHINES = {
     "M5": {"name": "Packaging", "type": "Integrated Drive",   "has_vibration": True,  "nominal_kw": 7.0}
 }
 
-# Multi-Product Operating Contexts
+# ==============================================================================
+# 5. Multi-Product Operating Contexts (Engineering Assumptions)
+# ==============================================================================
 PRODUCTS = {
     "Product_A": {
         "name": "Product A (Light)",
@@ -59,7 +70,9 @@ PRODUCTS = {
     }
 }
 
-# Machine State Machine Identifiers
+# ==============================================================================
+# 6. Machine States & Decision Thresholds (Engineering Parameters)
+# ==============================================================================
 STATE_NORMAL = "NORMAL"
 STATE_DEGRADING = "DEGRADING"
 STATE_WARNING = "WARNING"
@@ -69,7 +82,6 @@ STATE_FAILED = "FAILED"
 STATE_MAINTENANCE = "MAINTENANCE"
 STATE_RECOVERY = "RECOVERY"
 
-# Anomaly Detection, Persistence & Decision Thresholds
 PERSISTENCE_WINDOW = 5
 HEALTH_INDEX_MAX = 100.0
 HEALTH_INDEX_MIN = 0.0
@@ -81,7 +93,7 @@ HI_THRESHOLDS = {
     "CRITICAL": 10.0
 }
 
-# Normalized Health Indicator Penalty Weights (Sum = 1.0)
+# Normalized Health Indicator Penalty Weights (Engineering Parameters, Sum = 1.0)
 HI_WEIGHTS = {
     "alpha": 0.30,  # AI Anomaly Score
     "beta": 0.25,   # Persistence Filter Ratio
@@ -89,7 +101,7 @@ HI_WEIGHTS = {
     "delta": 0.20   # Physical Thermal & Vibration Penalty
 }
 
-# Standard Benchmark Scenario Configuration (Decoupled & Isolated)
+# Standard Benchmark Scenario Configuration (Isolated Experiment Baseline)
 BENCHMARK_CONFIG = {
     "fault_machine": "M3",
     "fault_start": 60,

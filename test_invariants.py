@@ -1,9 +1,8 @@
 """
-PRIME-Factory Invariant & Regression Safeguards v4.1
+PRIME-Factory Invariant & Regression Safeguards v4.2
 Guarantees physical and algorithmic consistency across code updates (P0-01, P0-02, P0-04, P0-07).
 """
 
-import pytest
 import config
 from maintenance.policies import FactoryPolicySimulator
 from ai.health_index import estimate_rolling_rul

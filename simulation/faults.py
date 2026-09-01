@@ -1,13 +1,13 @@
 """
-PRIME-Factory Multi-Fault & Scenario Injection Engine v4.1
-Generates continuous degradation profiles (P0-01 Fix) and handles sensor noise stress tests.
+PRIME-Factory Multi-Fault & Scenario Injection Engine v4.2
+Generates continuous, time-varying degradation profiles shared across policy branches (P0-01).
 """
 
 import numpy as np
 import config
 
 def generate_degradation_profile(total_timesteps: int, start_time: int, max_degradation: float = 0.85) -> list:
-    """Generates continuous mechanical bearing wear degradation profile."""
+    """Generates a smooth, monotonically increasing bearing wear degradation trajectory."""
     profile = np.zeros(total_timesteps)
     if start_time < total_timesteps:
         duration = total_timesteps - start_time
@@ -15,7 +15,7 @@ def generate_degradation_profile(total_timesteps: int, start_time: int, max_degr
     return profile.tolist()
 
 def generate_friction_profile(total_timesteps: int, start_time: int, max_friction: float = 0.40) -> list:
-    """Generates progressive mechanical friction / conveyor belt resistance profile."""
+    """Generates continuous mechanical friction / conveyor belt drag profile."""
     profile = np.zeros(total_timesteps)
     if start_time < total_timesteps:
         duration = total_timesteps - start_time
@@ -23,7 +23,7 @@ def generate_friction_profile(total_timesteps: int, start_time: int, max_frictio
     return profile.tolist()
 
 def generate_electrical_profile(total_timesteps: int, start_time: int, max_severity: float = 0.40) -> list:
-    """Generates stator winding degradation and power factor drop profile."""
+    """Generates stator winding degradation and power factor decay profile."""
     profile = np.zeros(total_timesteps)
     if start_time < total_timesteps:
         duration = total_timesteps - start_time

@@ -1,7 +1,7 @@
 """
-PRIME-Factory Master Experiment & High-Resolution Evidence Generator v4.1
+PRIME-Factory Master Experiment & High-Resolution Evidence Generator v4.2
 Executes decoupled scientific benchmarks, multi-seed stochastic validation, ablation analysis,
-and exports publication-grade figures (300 DPI) for academic documentation.
+and exports publication-grade figures (300 DPI) for academic documentation (Section 23 & P1-09).
 """
 
 import os
@@ -25,7 +25,7 @@ from evaluation.ablation import run_ablation_study
 def run_master_experiment():
     os.makedirs("exports", exist_ok=True)
     print("\n" + "="*80)
-    print("      PRIME-FACTORY MASTER EXPERIMENT & EVIDENCE ENGINE v4.1")
+    print("      PRIME-FACTORY MASTER EXPERIMENT & EVIDENCE ENGINE v4.2")
     print("="*80)
 
     # 1. Generate Clean Baseline & Train Isolation Forest
@@ -84,13 +84,13 @@ def run_master_experiment():
     m3_df["rul_minutes"] = rul_list
 
     # 3. Execute Pure Detector Ablation Study
-    print("\n[+] Running Calibrated Detector Ablation Study (v4.1)...")
+    print("\n[+] Running Calibrated Detector Ablation Study (v4.2)...")
     ablation_df = run_ablation_study(m3_df)
     print(ablation_df.to_string(index=False))
     ablation_df.to_csv("exports/ablation_results.csv", index=False)
 
     # 4. Execute Decoupled Scientific Policy Benchmark
-    print("\n[+] Running Scientific Factory Policy Benchmark (v4.1)...")
+    print("\n[+] Running Scientific Factory Policy Benchmark (v4.2)...")
     policies = [
         ("CORRECTIVE", False),
         ("PREVENTIVE", False),

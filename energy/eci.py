@@ -1,12 +1,12 @@
 """
-PRIME-Factory Context-Aware Energy Condition Indicator (ECI) v4.1
-Calculates expected power using commanded reference speed to preserve a true uncorrupted baseline.
+PRIME-Factory Context-Aware Energy Condition Indicator (ECI) v4.2
+Computes expected nominal power using commanded reference speed to preserve a true uncorrupted baseline (P0-02).
 """
 
 import config
 
 def get_context_expected_power(machine_id: str, product_key: str) -> float:
-    """Computes expected active power under healthy conditions for a given product recipe."""
+    """Computes expected active power under healthy nominal conditions for a given product recipe."""
     machine_nominal = config.MACHINES[machine_id]["nominal_kw"]
     prod = config.PRODUCTS[product_key]
     commanded_speed_rpm = 1500.0 * prod["speed_factor"]

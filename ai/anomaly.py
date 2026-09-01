@@ -1,6 +1,6 @@
 """
-PRIME-Factory Persistence Logic & Temporal Filter v4.1
-Prevents nuisance alarms from single transient spikes using sliding confirmation windows.
+PRIME-Factory Persistence Logic & Temporal Filter v4.2
+Rejects transient noise spikes and enforces multi-sample temporal confirmation before alerting (P0-06).
 """
 
 import collections
@@ -26,4 +26,5 @@ class AnomalyProcessor:
         }
 
     def reset(self):
+        """Clears the temporal history buffer."""
         self.history.clear()

@@ -1,6 +1,6 @@
 """
-PRIME-Factory Decision & Explainability Engine v4.1
-Generates operational recommendations, urgency ratings, and Decision Trace cards for operators.
+PRIME-Factory Decision & Explainability Engine v4.2
+Generates operational directives, urgency levels, and Decision Trace cards based on causal evidence (Section 8).
 """
 
 import config
@@ -22,8 +22,8 @@ class DecisionEngine:
             decision_code = "IN_SERVICE"
             title = "Maintenance / Post-Repair Stabilization"
             urgency = "LOW"
-            recommended_action = "Allow machine to complete recovery cycle"
-            consequence_of_inaction = "N/A — Asset currently being managed"
+            recommended_action = "Allow machine to complete stabilization cycle"
+            consequence_of_inaction = "N/A — Asset currently being serviced/recovering"
         elif health_index <= config.HI_THRESHOLDS["CRITICAL"] or current_state == config.STATE_CRITICAL:
             decision_code = "CONTROLLED_STOP"
             title = "CRITICAL: Immediate Controlled Shutdown Required"
@@ -35,7 +35,7 @@ class DecisionEngine:
             title = "PREDICTIVE ACTION: Schedule 15-min Targeted Intervention"
             urgency = "HIGH"
             recommended_action = "Execute 15-min Planned Predictive Maintenance now"
-            consequence_of_inaction = "Bearing wear will progress to critical, causing 5x downtime and scrap losses"
+            consequence_of_inaction = "Bearing wear will progress to critical failure, causing 5x downtime and scrap losses"
         elif current_state == config.STATE_WARNING or abs(eci) > 0.08:
             decision_code = "ELEVATE_INSPECTION"
             title = "WARNING: Elevated Energy / Mechanical Drift"

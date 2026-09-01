@@ -1,6 +1,6 @@
 """
-PRIME-Factory Health Index, XAI Attribution & Rolling RUL Estimator v4.1
-Includes capped rolling RUL (P0-04 & P0-06 Fix) and normalized penalty breakdown.
+PRIME-Factory Health Index, Evidence Attribution & Trend-Based Rolling RUL Estimator v4.2
+Computes composite HI (0-100), bounded dynamic RUL (P1-04), and normalized modality penalty breakdown.
 """
 
 import numpy as np
@@ -13,8 +13,8 @@ def estimate_rolling_rul(
     window_size: int = 15
 ) -> tuple:
     """
-    Estimates Remaining Useful Life using rolling linear regression on Health Index history.
-    Dynamically shortens window to 5 minutes during alert states and caps RUL to shift duration.
+    Estimates trend-based Remaining Useful Life using rolling linear regression on HI history.
+    Dynamically shortens window to 5 minutes during alert/critical states and strictly caps RUL to shift duration.
     """
     w_size = 5 if current_state in [config.STATE_CRITICAL, config.STATE_PREDICTIVE_ALERT] else window_size
     if len(hi_history) < w_size:
@@ -47,7 +47,7 @@ def calculate_health_index_and_evidence(
     vib_rms: float
 ) -> dict:
     """
-    Computes composite Health Index (0-100) and normalized penalty attribution across sensor modalities.
+    Computes composite Health Index (0-100) and normalized penalty attribution across sensor modalities (P1-03).
     """
     w = config.HI_WEIGHTS
     

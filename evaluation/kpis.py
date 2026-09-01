@@ -1,6 +1,7 @@
 """
-PRIME-Factory KPI Evaluation Engine v4.1
-Calculates multi-product weighted OEE, production availability, performance efficiency, and quality yield.
+PRIME-Factory KPI Evaluation Engine v4.2
+Calculates multi-product weighted OEE, production availability, performance efficiency,
+and quality yield as the single source of truth across all views (P0-03, P1-07).
 """
 
 import config
@@ -14,7 +15,7 @@ def calculate_oee_multiproduct(
 ) -> dict:
     """
     Computes overall equipment effectiveness (OEE = Availability * Performance * Quality)
-    weighted by the product mix ideal cycle times (P0-03 Fix).
+    weighted by the product mix ideal cycle times.
     """
     # 1. Availability Ratio
     availability = (operating_time_min / planned_time_min) if planned_time_min > 0 else 0.0
