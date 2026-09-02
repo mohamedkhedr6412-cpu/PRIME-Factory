@@ -1,97 +1,177 @@
 """
-PRIME-Factory Persistence Logic & Temporal Filter v6.0
-Rejects transient noise spikes and enforces multi-sample temporal confirmation before alerting (Section 6 & 8).
+PRIME-Factory Anomaly Confirmation Engine v6.1
+
+Separates:
+1. Raw AI anomaly
+2. Context residual evidence
+3. ECI evidence
+4. Temporal persistence
+5. Final confirmation
+
+No layer silently substitutes another layer.
 """
 
-import collections
-import config
-import numpy as np
+from __future__ import annotations
+
+from collections import deque
 from typing import Dict, Optional
+
+import numpy as np
+
+import config
 
 
 class AnomalyProcessor:
     """
-    Anomaly processor with persistence filtering and context-awareness.
-    Implements Layers A-E from Section 8.
+    Machine-local temporal anomaly processor with persistence.
     """
-    
-    def __init__(self, window_size: int = config.PERSISTENCE_WINDOW):
-        self.window_size = window_size
-        self.history = collections.deque(maxlen=window_size)
-        self.context_history = collections.deque(maxlen=window_size)
-        self._last_context = None
+
+    def __init__(
+        self,
+        window_size: int = config.PERSISTENCE_WINDOW,
+        threshold: float = 0.50,
+        persistence_threshold: float = 0.80,
+        eci_threshold: Optional[float] = None,
+    ):
+        self.window_size = max(1, int(window_size))
+        self.threshold = float(threshold)
+        self.persistence_threshold = float(persistence_threshold)
+
+        self.eci_threshold = (
+            float(eci_threshold)
+            if eci_threshold is not None
+            else float(
+                config.DECISION_CONFIG.get(
+                    "eci_deviation_threshold",
+                    0.15,
+                )
+            )
+        )
+
+        self.history = deque(maxlen=self.window_size)
+        self.score_history = deque(maxlen=self.window_size)
+        self.context_history = deque(maxlen=self.window_size)
+
+    # ------------------------------------------------------------------
+    # Core update
+    # ------------------------------------------------------------------
 
     def update(
-        self, 
-        raw_anomaly_score: float, 
-        threshold: float = 0.5,
-        context: Optional[Dict] = None
-    ) -> dict:
+        self,
+        raw_anomaly_score: float,
+        threshold: Optional[float] = None,
+        context: Optional[Dict] = None,
+    ) -> Dict:
         """
-        Updates the temporal persistence buffer with the latest anomaly score.
-        Now includes context-awareness for Layer C/D/E.
+        Process one detector output.
         """
-        # Base anomaly detection
-        is_anomaly = 1.0 if raw_anomaly_score > threshold else 0.0
-        self.history.append(is_anomaly)
-        
-        # Store context if provided
+        threshold = self.threshold if threshold is None else float(threshold)
+
+        score = float(np.clip(raw_anomaly_score, 0.0, 1.0))
+        raw_anomaly = int(score >= threshold)
+
+        self.score_history.append(score)
+        self.history.append(raw_anomaly)
+
+        if context is not None:
+            self.context_history.append(dict(context))
+
+        persistence_ratio = float(sum(self.history)) / float(self.window_size)
+        persistence_ready = len(self.history) >= self.window_size
+        persistent = int(persistence_ready and persistence_ratio >= self.persistence_threshold)
+
+        eci = 0.0
         if context:
-            self.context_history.append(context)
-            self._last_context = context
-        
-        # Calculate persistence
-        persistence_ratio = sum(self.history) / float(self.window_size)
-        is_confirmed = 1 if (len(self.history) == self.window_size and persistence_ratio >= 0.8) else 0
-        
-        # Layer D: Energy residual evidence
-        eci_evidence = 0.0
-        if context and 'eci' in context:
-            eci_value = context.get('eci', 0.0)
-            eci_threshold = config.DECISION_CONFIG.get('eci_deviation_threshold', 0.15)
-            eci_evidence = 1.0 if abs(eci_value) > eci_threshold else 0.0
-        
-        # Layer E: Decision-ready confirmation
-        combined_confirmed = 1 if (is_confirmed and (not context or eci_evidence < 0.5)) else 0
-        
+            eci = float(context.get("eci", 0.0))
+
+        eci_evidence = int(abs(eci) >= self.eci_threshold)
+
         return {
-            "is_raw_anomaly": int(is_anomaly),
+            "raw_anomaly_score": round(score, 4),
+            "is_raw_anomaly": raw_anomaly,
             "persistence_ratio": round(persistence_ratio, 3),
-            "is_confirmed_anomaly": is_confirmed,
-            "is_combined_evidence": combined_confirmed,
+            "is_persistent": persistent,
+            "is_confirmed_anomaly": persistent,  # For backward compatibility
             "eci_evidence": eci_evidence,
-            "context": context
+            "eci": round(eci, 4),
+            "context": context or {},
         }
+
+    # ------------------------------------------------------------------
+    # Context normalization
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def calculate_context_residual(
+        actual_value: float,
+        expected_value: float,
+    ) -> float:
+        """Calculate normalized residual between actual and expected."""
+        denominator = max(abs(float(expected_value)), 1e-6)
+        residual = abs(float(actual_value) - float(expected_value)) / denominator
+        return float(residual)
 
     def update_with_context_normalization(
         self,
         raw_anomaly_score: float,
         expected_value: float,
         actual_value: float,
-        threshold: float = 0.5,
-        context: Optional[Dict] = None
-    ) -> dict:
+        threshold: Optional[float] = None,
+        context: Optional[Dict] = None,
+    ) -> Dict:
         """
-        Layer C: Context-normalized residual features.
-        Uses expected vs actual values for context-aware detection.
+        Update with context residual evidence.
         """
-        # Calculate residual
-        residual = abs(actual_value - expected_value) / max(abs(expected_value), 0.001)
-        
-        # Combine with raw anomaly score
-        normalized_score = (raw_anomaly_score + residual) / 2.0
-        
-        return self.update(normalized_score, threshold, context)
+        residual = self.calculate_context_residual(
+            actual_value=actual_value,
+            expected_value=expected_value,
+        )
 
-    def reset(self):
-        """Clears the temporal history buffer."""
-        self.history.clear()
-        self.context_history.clear()
-        self._last_context = None
+        context_data = dict(context or {})
+        context_data["context_residual"] = round(residual, 4)
+
+        result = self.update(
+            raw_anomaly_score=raw_anomaly_score,
+            threshold=threshold,
+            context=context_data,
+        )
+
+        result["context_residual"] = round(residual, 4)
+        return result
+
+    # ------------------------------------------------------------------
+    # Final fusion
+    # ------------------------------------------------------------------
+
+    def confirm(
+        self,
+        ai_confirmed: bool,
+        eci_confirmed: bool,
+        require_eci: bool = False,
+    ) -> bool:
+        """Convert independent evidence into final confirmation."""
+        if require_eci:
+            return bool(ai_confirmed and eci_confirmed)
+        return bool(ai_confirmed)
+
+    # ------------------------------------------------------------------
+    # Diagnostics
+    # ------------------------------------------------------------------
 
     def get_persistence_trend(self) -> float:
-        """Calculate trend in persistence over the history window."""
-        if len(self.history) < 3:
+        if len(self.score_history) < 3:
             return 0.0
-        recent = list(self.history)[-5:]
-        return sum(recent) / len(recent) if recent else 0.0
+
+        values = list(self.score_history)[-5:]
+        if len(values) < 2:
+            return 0.0
+
+        x = np.arange(len(values), dtype=float)
+        y = np.asarray(values, dtype=float)
+        slope = np.polyfit(x, y, 1)[0]
+        return round(float(slope), 5)
+
+    def reset(self) -> None:
+        self.history.clear()
+        self.score_history.clear()
+        self.context_history.clear()

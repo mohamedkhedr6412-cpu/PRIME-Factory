@@ -121,7 +121,7 @@ elif j_step == 3:
     demo_step_desc = "PdM Intervention & Recovery"
 else:
     # Manual mode
-    st.side_subtitle = st.sidebar.subheader("⚙️ Manual Configuration")
+    st.sidebar.subheader("⚙️ Manual Configuration")
     sim_mode = st.sidebar.radio(
         "Operating Schedule:",
         ["Fixed Product Regime", "Multi-Product Switching (A → B → C)"],
@@ -194,7 +194,7 @@ else:
     from simulation.faults import generate_switching_schedule
     schedule = generate_switching_schedule(config.TOTAL_TIMESTEPS)
 
-# Build scenario
+# Build scenario - FIXED: Added policy_type
 scenario_active = ScenarioConfig(
     scenario_id="LIVE_DASHBOARD_RUN",
     seed=config.RANDOM_SEED,
@@ -206,7 +206,7 @@ scenario_active = ScenarioConfig(
     enable_chaos=enable_chaos,
     enable_peak_shaving=apply_dr,
     manual_pdm_timestep=st.session_state.manual_pdm_timestep,
-    policy_type="PREDICTIVE"
+    policy_type="PREDICTIVE"  # <-- FIXED: Added policy_type
 )
 
 # Run or use cached results

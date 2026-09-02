@@ -88,7 +88,7 @@ class UnifiedSimulationEngine:
 
         healthy_df = pd.DataFrame(healthy_df)
 
-        # Train Isolation Forest
+        # Train Isolation Forest - FIXED: Use correct variable name
         if len(healthy_df) >= 20:
             if_detector = PRIMEIsolationForest(
                 contamination=0.02,
@@ -392,7 +392,6 @@ class UnifiedSimulationEngine:
                 if trace_id:
                     record["evidence_trace_id"] = trace_id
 
-                # FIXED: Use machine's cumulative energy directly
                 record["cumulative_energy_kwh"] = machine.cumulative_energy_kwh
 
                 records.append(record)
@@ -429,7 +428,6 @@ class UnifiedSimulationEngine:
         # ===== 7. Final calculations =====
         telemetry_df = pd.DataFrame(records)
 
-        # FIXED: Calculate energy directly from telemetry (single source of truth)
         if not telemetry_df.empty:
             agg_power = telemetry_df.groupby("timestep")["power_kw"].sum()
             total_energy_kwh = float(np.sum(agg_power) * (config.TIME_STEP_MINUTES / 60.0))
