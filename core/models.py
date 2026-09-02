@@ -1,7 +1,6 @@
 """
-PRIME-Factory Canonical Data Models & System Architecture v6.0
-Strictly implements the unified data objects defined in Section 3 & 17 of Constitution v6.0.
-Updated to support decision engine and evidence tracking.
+PRIME-Factory Canonical Data Models & System Architecture v6.1
+Strictly implements the unified data objects defined in the Constitution.
 """
 
 from dataclasses import dataclass, field
@@ -19,8 +18,15 @@ class ScenarioConfig:
     fault_type: str
     fault_start: int
     max_degradation: float
+
+    # NEW: Policy type (v6.1)
+    policy_type: str = "PREDICTIVE"
+
+    # Optional flags
     enable_chaos: bool = False
     enable_peak_shaving: bool = False
+
+    # Legacy compatibility (will be deprecated)
     manual_pdm_timestep: Optional[int] = None
     product_switch_schedule: Optional[List[str]] = None
 
@@ -108,4 +114,10 @@ class SimulationResult:
     resilience: ResilienceMetrics
     decisions: List[DecisionRecord] = field(default_factory=list)
     evidence_traces: List[EvidenceTrace] = field(default_factory=list)
-    evidence_tracker: Optional[Any] = None  # NEW: Store EvidenceTracker instance
+    evidence_tracker: Optional[Any] = None
+
+    # Legacy compatibility for old tests
+    def __getitem__(self, key):
+        if hasattr(self, key):
+            return getattr(self, key)
+        raise KeyError(key)

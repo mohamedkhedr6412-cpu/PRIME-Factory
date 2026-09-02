@@ -1,18 +1,19 @@
 """
-PRIME-Factory KPI Evaluation Engine v6.0
-Calculates multi-product weighted OEE, production availability, performance efficiency,
-and quality yield as the single source of truth across all views (Section 11 & 17).
+PRIME-Factory KPI Evaluation Engine v6.1
+Single source of truth for OEE and production KPIs.
 """
 
 import config
+from typing import List, Dict
+
 
 def calculate_oee_multiproduct(
     planned_time_min: float,
     operating_time_min: float,
-    product_schedule: list,
+    product_schedule: List[str],
     total_units: int,
     good_units: int
-) -> dict:
+) -> Dict:
     """
     Computes overall equipment effectiveness (OEE = Availability * Performance * Quality)
     weighted by the product mix ideal cycle times.
@@ -24,8 +25,8 @@ def calculate_oee_multiproduct(
     # 2. Performance Ratio (Weighted Ideal Cycle Time)
     cycle_times = [config.PRODUCTS[p]["base_cycle_time"] for p in product_schedule]
     weighted_ideal_cycle_sec = sum(cycle_times) / len(cycle_times) if len(cycle_times) > 0 else 1.5
+
     operating_time_sec = operating_time_min * 60.0
-    
     if operating_time_sec > 0:
         performance = (weighted_ideal_cycle_sec * total_units) / operating_time_sec
     else:
@@ -44,4 +45,34 @@ def calculate_oee_multiproduct(
         "performance_pct": round(float(performance * 100.0), 2),
         "quality_pct": round(float(quality * 100.0), 2),
         "oee_pct": round(float(oee), 2)
+    }
+
+
+def calculate_throughput(
+    good_units: int,
+    operating_time_min: float
+) -> float:
+    """Calculate throughput in units per hour."""
+    if operating_time_min <= 0:
+        return 0.0
+    return round(float(good_units / (operating_time_min / 60.0)), 2)
+
+
+def calculate_factory_efficiency(
+    total_energy_kwh: float,
+    good_units: int
+) -> Dict:
+    """Calculate energy efficiency metrics."""
+    if good_units <= 0:
+        return {
+            "energy_per_unit_wh": 0.0,
+            "energy_productivity": 0.0
+        }
+
+    energy_per_unit_wh = (total_energy_kwh * 1000) / good_units
+    energy_productivity = good_units / max(total_energy_kwh, 0.001)
+
+    return {
+        "energy_per_unit_wh": round(energy_per_unit_wh, 3),
+        "energy_productivity": round(energy_productivity, 3)
     }

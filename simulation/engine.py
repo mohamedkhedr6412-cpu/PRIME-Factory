@@ -1,6 +1,8 @@
 """
-PRIME-Factory Unified Simulation & KPI Engine v6.0
-Single Source of Truth for Live Telemetry, Benchmarks, and What-If Analysis (Section 3, 11, 16 & 17).
+PRIME-Factory Unified Simulation & KPI Engine v6.1
+
+Single Source of Truth for Live Telemetry, Benchmarks, and What-If Analysis.
+Now uses Isolation Forest as the primary anomaly detector.
 """
 
 from typing import List, Dict, Any, Optional
@@ -12,9 +14,9 @@ import config
 from simulation.factory import PackagingFactory
 from simulation.faults import build_fault_scenario
 from simulation.state_machine import AssetStateMachine
-from simulation.events import EventLog, SimulationEvent
+from simulation.events import EventLog
 
-# Import AI components
+from ai.isolation_forest import PRIMEIsolationForest
 from ai.anomaly import AnomalyProcessor
 from ai.health_index import (
     calculate_health_index_and_evidence,
@@ -23,7 +25,6 @@ from ai.health_index import (
 )
 from ai.decision import DecisionEngine
 
-# Import core components
 from core.models import (
     ScenarioConfig,
     ResilienceMetrics,
@@ -33,35 +34,35 @@ from core.models import (
 )
 from core.evidence import EvidenceTracker
 
+from energy.eci import calculate_eci, get_context_expected_power
+from evaluation.kpis import calculate_oee_multiproduct
+
 
 class UnifiedSimulationEngine:
     """
     Unified engine for running PRIME-Factory simulations.
-    Integrates factory, state machines, events, decision engine, and evidence tracking.
+    Integrates factory, state machines, AI (Isolation Forest), decisions,
+    evidence tracking, and KPIs.
     """
-    
+
     @staticmethod
     def run(scenario: ScenarioConfig) -> SimulationResult:
         """
         Run a complete simulation scenario.
-        Returns SimulationResult with all telemetry, events, decisions, and evidence traces.
+        Returns SimulationResult with all telemetry, events, decisions,
+        and evidence traces.
         """
         rng = np.random.RandomState(scenario.seed)
-        
-        # Initialize factory and event log
+
+        # ===== 1. Initialize components =====
         factory = PackagingFactory(seed=scenario.seed)
         event_log = EventLog()
-        
-        # Initialize decision engine and evidence tracker
         decision_engine = DecisionEngine()
         evidence_tracker = EvidenceTracker()
-        
+
         timesteps = len(scenario.product_schedule)
-        events: List[SimulationEvent] = []
-        decisions: List[DecisionRecord] = []
-        evidence_traces: List[EvidenceTrace] = []
-        
-        # Build fault scenario if not healthy baseline
+
+        # ===== 2. Build fault scenario =====
         degradation_plan = None
         if scenario.fault_type != "None (Healthy Baseline)":
             fault_scenario = build_fault_scenario(
@@ -72,25 +73,49 @@ class UnifiedSimulationEngine:
                 total_timesteps=timesteps
             )
             degradation_plan = {scenario.fault_machine: fault_scenario["degradation_profile"]}
-        
-        # Start the factory
+
+        # ===== 3. Train Isolation Forest on healthy baseline =====
         factory.start()
-        
-        # Initialize state machines for each machine
-        state_machines = {
-            mid: AssetStateMachine(mid) for mid in factory.machines
-        }
-        
-        # Initialize anomaly processors for each machine
-        processors = {
-            mid: AnomalyProcessor(config.PERSISTENCE_WINDOW) 
-            for mid in factory.machines
-        }
-        
-        # Tracking variables
+        factory.reset_factory()
+
+        # Generate healthy baseline data
+        healthy_df = []
+        for t in range(min(timesteps, 200)):
+            prod_key = scenario.product_schedule[t]
+            for mid, machine in factory.machines.items():
+                record = machine.step(prod_key, dt_minutes=config.TIME_STEP_MINUTES, rng=rng)
+                healthy_df.append(record)
+
+        healthy_df = pd.DataFrame(healthy_df)
+
+        # Train Isolation Forest
+        if len(healthy_df) >= 20:
+            if_detector = PRIMEIsolationForest(
+                contamination=0.02,
+                seed=scenario.seed,
+                threshold=0.50
+            )
+            if_detector.fit(healthy_df)
+            if_ready = True
+        else:
+            if_ready = False
+            if_detector = None
+
+        # Reset factory for actual simulation
+        factory.reset_factory()
+        factory.start()
+
+        # ===== 4. Initialize trackers =====
+        state_machines = {mid: AssetStateMachine(mid) for mid in factory.machines}
+        processors = {mid: AnomalyProcessor(config.PERSISTENCE_WINDOW) for mid in factory.machines}
+
         records = []
         hi_histories = {mid: [] for mid in factory.machines}
-        
+        decisions = []
+        evidence_traces = []
+        events = []
+
+        # ===== 5. Tracking variables =====
         is_repairing = False
         repair_timer = 0
         downtime_minutes = 0.0
@@ -98,62 +123,57 @@ class UnifiedSimulationEngine:
         total_units = 0
         good_units = 0
         scrap_units = 0
-        
+
         recovery_start_t = None
         recovery_end_t = None
         alert_triggered_t = None
         trace_started_for_alert = None
-        
-        # Log system start
-        event_log.add_event(0, "SYSTEM_START", "INFO", "ALL", 
-                           "Line initialized in healthy nominal state.")
-        
-        # Main simulation loop
+
+        # Per-machine state tracking for transition detection
+        last_state_by_machine = {mid: config.STATE_NORMAL for mid in factory.machines}
+
+        # ===== 6. Main simulation loop =====
         for t in range(timesteps):
             prod_key = scenario.product_schedule[t]
-            
-            # Handle product switching if specified
-            if scenario.product_switch_schedule and t < len(scenario.product_switch_schedule):
-                prod_key = scenario.product_switch_schedule[t]
-            
-            # Check for manual PdM intervention
+
+            # ----- 6a. Check for manual PdM intervention (legacy) -----
             if scenario.manual_pdm_timestep is not None and t == scenario.manual_pdm_timestep:
                 is_repairing = True
                 repair_timer = config.MAINTENANCE_DURATION_MINUTES
                 maintenance_events += 1
                 event_log.add_event(t, "MAINTENANCE_EXECUTED", "INFO", scenario.fault_machine,
-                                   f"Targeted {config.MAINTENANCE_DURATION_MINUTES}-minute Predictive Intervention executed.",
-                                   recommended_action="Monitor recovery")
-            
-            # Handle maintenance state
+                                   f"Manual PdM executed at t={t}.")
+
+            # ----- 6b. Handle maintenance state -----
             if is_repairing:
                 repair_timer -= 1
                 downtime_minutes += 1.0
-                
+
                 if repair_timer <= 0:
                     is_repairing = False
                     factory.reset_machine(scenario.fault_machine)
                     recovery_start_t = t
                     event_log.add_event(t, "RECOVERY_STARTED", "INFO", scenario.fault_machine,
-                                       "Post-repair stabilization phase initiated.",
-                                       recommended_action="Monitor stabilization")
-                
-                # Log maintenance state for all machines
+                                       "Post-repair stabilization phase initiated.")
+
+                # Log maintenance state
                 for mid, machine in factory.machines.items():
                     records.append({
-                        "timestep": t,
                         "machine_id": mid,
-                        "state": config.STATE_MAINTENANCE,
+                        "timestep": t,
                         "product": prod_key,
+                        "state": config.STATE_MAINTENANCE,
                         "degradation": 0.0,
                         "health_index": 100.0,
+                        "speed_rpm": 0.0,
+                        "load_factor": 0.0,
                         "vibration_rms": 0.0,
-                        "temperature_c": machine.temperature_c if hasattr(machine, 'temperature_c') else 30.0,
-                        "active_power_kw": 0.2,
+                        "temperature_c": 30.0,
+                        "current_a": 0.0,
+                        "power_kw": 0.2,
                         "power_factor": 0.95,
-                        "expected_p": 0.2,
                         "eci": 0.0,
-                        "context_ai_score": 0.0,
+                        "expected_power_kw": 0.2,
                         "persistence_ratio": 0.0,
                         "confirmed_anomaly": 0,
                         "rul_minutes": -1,
@@ -165,68 +185,53 @@ class UnifiedSimulationEngine:
                             "Thermal/Vibration": 0.0
                         },
                         "decision_id": None,
-                        "evidence_trace_id": None
+                        "evidence_trace_id": None,
+                        "cumulative_energy_kwh": 0.0
                     })
                 continue
-            
-            # Normal operation: step each machine
+
+            # ----- 6c. Normal operation: step each machine -----
             step_records = []
+
             for mid, machine in factory.machines.items():
                 # Apply degradation from fault plan
                 if degradation_plan and mid in degradation_plan:
                     machine.degradation_level = degradation_plan[mid][t]
                 else:
                     machine.degradation_level = 0.0
-                
+
                 # Step the machine
                 record = machine.step(prod_key, dt_minutes=config.TIME_STEP_MINUTES, rng=rng)
-                
-                # Add chaos if enabled
-                if scenario.enable_chaos and mid == scenario.fault_machine:
-                    if hasattr(machine, 'has_vibration') and machine.has_vibration:
-                        if rng.uniform(0, 1) < 0.03:
-                            record["vibration_rms"] += rng.uniform(1.2, 2.5)
-                
-                # Apply peak shaving if enabled
-                if scenario.enable_peak_shaving:
-                    speed_mod = 0.85  # Simple derating
-                    record["active_power_kw"] = record["active_power_kw"] * (speed_mod ** 2)
-                
-                # Calculate expected power and ECI
-                product_config = config.PRODUCTS.get(prod_key, config.PRODUCTS["Product_B"])
-                expected_power = machine.nominal_kw * product_config["nominal_power_mult"]
-                record["expected_p"] = expected_power
-                
-                # Simple ECI calculation
-                eci = (record["active_power_kw"] - expected_power) / max(expected_power, 0.1)
-                record["eci"] = eci
-                
                 step_records.append(record)
-            
-            # Process each machine's data with AI and Decision Engine
+
+            # ----- 6d. Process each machine with AI -----
             for record in step_records:
                 mid = record["machine_id"]
                 machine = factory.machines[mid]
-                
-                # ===== ANOMALY DETECTION =====
+
+                # ---- ANOMALY DETECTION ----
                 context = {
                     "product": prod_key,
-                    "speed": record.get("speed_factor", 1.0),
-                    "load": record.get("load_factor", 1.0),
+                    "speed_factor": record.get("speed_factor", 1.0),
+                    "load_factor": record.get("load_factor", 1.0),
                     "eci": record.get("eci", 0.0)
                 }
-                
-                anomaly_score = record.get("context_ai_score", 0.0)
-                if anomaly_score == 0.0:
-                    anomaly_score = min(1.0, abs(record["eci"]) * 2.0)
-                
+
+                # Get Isolation Forest score (if available)
+                if if_ready and if_detector is not None:
+                    df_row = pd.DataFrame([record])
+                    if_score = if_detector.predict_anomaly_score(df_row)[0]
+                    anomaly_score = float(if_score)
+                else:
+                    anomaly_score = min(1.0, abs(record.get("eci", 0.0)) * 2.0)
+
                 processor_result = processors[mid].update(
                     raw_anomaly_score=anomaly_score,
                     threshold=0.5,
                     context=context
                 )
-                
-                # ===== HEALTH INDEX =====
+
+                # ---- HEALTH INDEX ----
                 hi_result = calculate_health_index_and_evidence(
                     anomaly_score=anomaly_score,
                     persistence_ratio=processor_result["persistence_ratio"],
@@ -237,19 +242,20 @@ class UnifiedSimulationEngine:
                 )
                 health_index = hi_result["health_index"]
                 hi_histories[mid].append(health_index)
-                
-                # ===== RUL =====
+
+                # ---- RUL ----
                 rul_value, rul_str = estimate_rolling_rul(
                     hi_histories[mid],
                     current_state=machine.current_state,
                     current_t=t,
                     window_size=15
                 )
-                
-                # ===== STATE MACHINE =====
+                rul_confidence = get_hi_confidence(health_index, len(hi_histories[mid]))
+
+                # ---- STATE MACHINE ----
                 sm = state_machines[mid]
-                is_confirmed = bool(processor_result["is_confirmed_anomaly"])
-                
+                is_confirmed = bool(processor_result.get("is_confirmed_anomaly", False))
+
                 new_state = sm.update_state_with_hysteresis(
                     degradation=record["degradation"],
                     health_index=health_index,
@@ -257,10 +263,9 @@ class UnifiedSimulationEngine:
                     in_maintenance=False,
                     maintenance_duration=config.MAINTENANCE_DURATION_MINUTES
                 )
-                
                 machine.current_state = new_state
-                
-                # ===== DECISION ENGINE =====
+
+                # ---- DECISION ENGINE ----
                 decision = decision_engine.evaluate(
                     machine_id=mid,
                     timestamp=t,
@@ -269,12 +274,100 @@ class UnifiedSimulationEngine:
                     rul_minutes=rul_value,
                     eci=record["eci"],
                     is_confirmed_anomaly=is_confirmed,
+                    persistence_ratio=processor_result["persistence_ratio"],
                     production_units=total_units,
                     context=context
                 )
-                
-                # Convert to DecisionRecord for storage
-                decision_record = DecisionRecord(
+
+                # ---- EVIDENCE TRACKING ----
+                important_events = [
+                    config.STATE_PREDICTIVE_ALERT,
+                    config.STATE_CRITICAL,
+                    config.STATE_FAILED,
+                    config.STATE_MAINTENANCE,
+                    config.STATE_RECOVERY
+                ]
+
+                create_trace = (
+                    new_state in important_events or
+                    is_confirmed or
+                    (health_index < 70.0 and anomaly_score > 0.4) or
+                    (abs(record.get("eci", 0.0)) > 0.20)
+                )
+
+                trace_id = None
+                if create_trace:
+                    trace = evidence_tracker.create_complete_chain(
+                        machine_id=mid,
+                        timestamp=t,
+                        sensor_data={
+                            "vibration_rms": record.get("vibration_rms", 0.0),
+                            "temperature_c": record["temperature_c"],
+                            "active_power_kw": record["power_kw"],
+                            "power_factor": record.get("power_factor", 0.95)
+                        },
+                        context=context,
+                        anomaly_score=anomaly_score,
+                        persistence_ratio=processor_result["persistence_ratio"],
+                        is_confirmed=is_confirmed,
+                        health_index=health_index,
+                        rul_minutes=rul_value,
+                        eci=record["eci"],
+                        state=new_state,
+                        decision_recommendation=decision.recommendation,
+                        decision_id=decision.decision_id
+                    )
+                    trace_id = trace.trace_id
+                    evidence_traces.append(EvidenceTrace(
+                        trace_id=trace.trace_id,
+                        machine_id=trace.machine_id,
+                        start_timestamp=trace.start_timestamp,
+                        end_timestamp=trace.end_timestamp,
+                        steps=[{"step_type": s.step_type, "data": s.data, "description": s.description}
+                               for s in trace.steps],
+                        decision_id=trace.decision_id,
+                        final_outcome=trace.final_outcome
+                    ))
+
+                # ---- TRACK STATE CHANGES ----
+                prev_state = last_state_by_machine.get(mid)
+                if prev_state != new_state:
+                    event_log.add_event(
+                        t, "STATE_CHANGE", "INFO", mid,
+                        f"State transition: {prev_state} → {new_state}",
+                        state_before=prev_state,
+                        state_after=new_state
+                    )
+                    last_state_by_machine[mid] = new_state
+
+                    if new_state == config.STATE_PREDICTIVE_ALERT and alert_triggered_t is None:
+                        alert_triggered_t = t
+                        event_log.add_event(
+                            t, "PREDICTIVE_ALERT", "PREDICTIVE", mid,
+                            f"Actionable anomaly detected. HI: {health_index:.1f}",
+                            recommended_action=decision.recommendation
+                        )
+                        if trace_id:
+                            trace_started_for_alert = trace_id
+
+                    if new_state == config.STATE_NORMAL and recovery_start_t is not None and recovery_end_t is None:
+                        recovery_end_t = t
+                        event_log.add_event(
+                            t, "RECOVERY_COMPLETED", "INFO", mid,
+                            f"Asset recovered to healthy baseline (HI: {health_index:.1f})"
+                        )
+                        if trace_started_for_alert:
+                            completed_trace = evidence_tracker.get_trace(trace_started_for_alert)
+                            if completed_trace:
+                                evidence_tracker.complete_trace(
+                                    completed_trace,
+                                    end_timestamp=t,
+                                    action_taken="Recovery completed",
+                                    outcome={"status": "recovered", "health_index": health_index}
+                                )
+
+                # ---- STORE DECISION ----
+                decisions.append(DecisionRecord(
                     decision_id=decision.decision_id,
                     timestamp=decision.timestamp,
                     machine_id=decision.machine_id,
@@ -284,118 +377,61 @@ class UnifiedSimulationEngine:
                     recommendation=decision.recommendation,
                     priority=decision.priority,
                     evidence_summary=decision.evidence_summary
-                )
-                decisions.append(decision_record)
-                
-                # ===== EVIDENCE TRACKER =====
-                trace = evidence_tracker.create_complete_chain(
-                    machine_id=mid,
-                    timestamp=t,
-                    sensor_data={
-                        "vibration_rms": record.get("vibration_rms", 0.0),
-                        "temperature_c": record["temperature_c"],
-                        "active_power_kw": record["active_power_kw"],
-                        "power_factor": record.get("power_factor", 0.95)
-                    },
-                    context=context,
-                    anomaly_score=anomaly_score,
-                    persistence_ratio=processor_result["persistence_ratio"],
-                    is_confirmed=is_confirmed,
-                    health_index=health_index,
-                    rul_minutes=rul_value,
-                    eci=record["eci"],
-                    state=new_state,
-                    decision_recommendation=decision.recommendation,
-                    decision_id=decision.decision_id
-                )
-                
-                # Convert to EvidenceTrace for storage
-                evidence_trace = EvidenceTrace(
-                    trace_id=trace.trace_id,
-                    machine_id=trace.machine_id,
-                    start_timestamp=trace.start_timestamp,
-                    end_timestamp=trace.end_timestamp,
-                    steps=[{"step_type": s.step_type, "data": s.data, "description": s.description} for s in trace.steps],
-                    decision_id=trace.decision_id,
-                    final_outcome=trace.final_outcome
-                )
-                evidence_traces.append(evidence_trace)
-                
-                # Track predictive alerts for trace completion
-                if new_state == config.STATE_PREDICTIVE_ALERT and alert_triggered_t is None:
-                    alert_triggered_t = t
-                    trace_started_for_alert = trace.trace_id
-                    event_log.add_event(
-                        t, "PREDICTIVE_ALERT", "PREDICTIVE", mid,
-                        f"Actionable anomaly detected. Health Index: {health_index:.1f}",
-                        recommended_action=decision.recommendation
-                    )
-                
-                # Track recovery completion
-                if new_state == config.STATE_NORMAL and recovery_start_t is not None and recovery_end_t is None:
-                    recovery_end_t = t
-                    event_log.add_event(
-                        t, "RECOVERY_COMPLETED", "INFO", mid,
-                        f"Asset fully recovered to healthy nominal baseline (HI: {health_index:.1f})"
-                    )
-                    # Complete the evidence trace
-                    if trace_started_for_alert:
-                        completed_trace = evidence_tracker.get_trace(trace_started_for_alert)
-                        if completed_trace:
-                            evidence_tracker.complete_trace(
-                                completed_trace,
-                                end_timestamp=t,
-                                action_taken="Recovery completed",
-                                outcome={"status": "recovered", "health_index": health_index}
-                            )
-                
-                # ===== UPDATE RECORD =====
+                ))
+
+                # ---- UPDATE RECORD ----
                 record["state"] = new_state
                 record["health_index"] = health_index
                 record["persistence_ratio"] = processor_result["persistence_ratio"]
-                record["confirmed_anomaly"] = processor_result["is_confirmed_anomaly"]
+                record["confirmed_anomaly"] = processor_result.get("is_confirmed_anomaly", 0)
                 record["rul_minutes"] = rul_value if rul_value is not None else -1
                 record["rul_str"] = rul_str
+                record["rul_confidence"] = rul_confidence
                 record["penalty_contributions"] = hi_result["penalty_contributions"]
                 record["decision_id"] = decision.decision_id
-                record["evidence_trace_id"] = trace.trace_id
-                
-                # Track state changes
-                if len(records) > 0:
-                    prev_record = records[-1]
-                    if prev_record.get("machine_id") == mid:
-                        prev_state = prev_record.get("state")
-                        if prev_state != new_state:
-                            event_log.add_event(
-                                t, "STATE_CHANGE", "INFO", mid,
-                                f"State transition: {prev_state} → {new_state}",
-                                state_before=prev_state,
-                                state_after=new_state
-                            )
-                
+                if trace_id:
+                    record["evidence_trace_id"] = trace_id
+
+                # FIXED: Use machine's cumulative energy directly
+                record["cumulative_energy_kwh"] = machine.cumulative_energy_kwh
+
                 records.append(record)
-            
-            # Update production metrics
-            target_deg = 0.0
-            if degradation_plan and scenario.fault_machine in degradation_plan:
-                target_deg = degradation_plan[scenario.fault_machine][t]
-            
-            base_cycle = config.PRODUCTS[prod_key]["base_cycle_time"]
-            m_units = int(60.0 / (base_cycle * (1.0 + 0.1 * target_deg)))
-            defect_rate = 0.005 + (0.04 * target_deg)
-            m_good = int(m_units * (1.0 - defect_rate))
-            m_scrap = m_units - m_good
-            
-            total_units += m_units
-            good_units += m_good
-            scrap_units += m_scrap
-        
-        # Build final DataFrame
+
+            # ----- 6e. Production (Bottleneck-based) -----
+            capacities = []
+            for mid, machine in factory.machines.items():
+                if machine.current_state not in [config.STATE_FAILED, config.STATE_MAINTENANCE]:
+                    prod_cfg = config.PRODUCTS[prod_key]
+                    cycle_time = prod_cfg["base_cycle_time"]
+                    speed_factor = prod_cfg["speed_factor"]
+                    capacity = speed_factor / cycle_time * 60.0
+                    capacity = capacity * (1.0 - 0.3 * machine.degradation_level)
+                    capacities.append(capacity)
+
+            if capacities:
+                line_rate = min(capacities)
+            else:
+                line_rate = 0.0
+
+            production_rate = line_rate * config.TIME_STEP_MINUTES
+            units_this_step = int(production_rate)
+
+            max_deg = max([m.degradation_level for m in factory.machines.values()])
+            defect_rate = 0.005 + (0.04 * max_deg)
+
+            good_this_step = int(units_this_step * (1.0 - defect_rate))
+            scrap_this_step = units_this_step - good_this_step
+
+            total_units += units_this_step
+            good_units += good_this_step
+            scrap_units += scrap_this_step
+
+        # ===== 7. Final calculations =====
         telemetry_df = pd.DataFrame(records)
-        
-        # Calculate KPIs
+
+        # FIXED: Calculate energy directly from telemetry (single source of truth)
         if not telemetry_df.empty:
-            agg_power = telemetry_df.groupby("timestep")["active_power_kw"].sum()
+            agg_power = telemetry_df.groupby("timestep")["power_kw"].sum()
             total_energy_kwh = float(np.sum(agg_power) * (config.TIME_STEP_MINUTES / 60.0))
             peak_demand_kw = float(np.max(agg_power)) if len(agg_power) > 0 else 0.0
             avg_pf = float(telemetry_df["power_factor"].mean()) if "power_factor" in telemetry_df.columns else 0.9
@@ -403,17 +439,18 @@ class UnifiedSimulationEngine:
             total_energy_kwh = 0.0
             peak_demand_kw = 0.0
             avg_pf = 0.9
-        
-        # Calculate OEE
+
+        # OEE using canonical KPI engine
         operating_time_min = timesteps - downtime_minutes
-        availability = (operating_time_min / timesteps) if timesteps > 0 else 0.0
-        
-        cycle_times = [config.PRODUCTS[p]["base_cycle_time"] for p in scenario.product_schedule]
-        weighted_ideal_sec = sum(cycle_times) / len(cycle_times) if cycle_times else 1.5
-        performance = ((weighted_ideal_sec * total_units) / (operating_time_min * 60.0)) if operating_time_min > 0 else 0.0
-        quality = (good_units / total_units) if total_units > 0 else 0.0
-        oee = availability * min(1.0, performance) * quality * 100.0
-        
+        oee_result = calculate_oee_multiproduct(
+            planned_time_min=timesteps,
+            operating_time_min=operating_time_min,
+            product_schedule=scenario.product_schedule,
+            total_units=total_units,
+            good_units=good_units
+        )
+        oee = oee_result["oee_pct"]
+
         # Financial calculations
         energy_cost = total_energy_kwh * config.ELECTRICITY_TARIFF_PER_KWH
         downtime_cost = downtime_minutes * (config.DOWNTIME_COST_PER_HOUR / 60.0)
@@ -421,19 +458,20 @@ class UnifiedSimulationEngine:
         total_cost = energy_cost + downtime_cost + pf_penalty
         carbon_kg = total_energy_kwh * config.CARBON_EMISSION_FACTOR
         energy_per_unit = (total_energy_kwh * 1000) / good_units if good_units > 0 else 0
-        
-        # Resilience metrics
+
+        # ---- RESILIENCE ----
+        if recovery_start_t is not None and recovery_end_t is None:
+            recovery_end_t = timesteps - 1
+
         resilience = ResilienceMetrics(
-            recovery_time_min=float(recovery_end_t - recovery_start_t) if (recovery_start_t and recovery_end_t) else 15.0,
-            production_loss_units=scrap_units + int(downtime_minutes * 35),
-            downtime_avoided_min=60.0 if scenario.manual_pdm_timestep else 0.0,
-            recovery_success=recovery_end_t is not None or scenario.manual_pdm_timestep is not None,
-            failure_avoided=target_deg < 0.75 or scenario.manual_pdm_timestep is not None,
-            total_decisions=len(decisions),
-            critical_decisions=len([d for d in decisions if d.priority == "CRITICAL"])
+            recovery_time_min=float(recovery_end_t - recovery_start_t) if (recovery_start_t and recovery_end_t) else 0.0,
+            production_loss_units=scrap_units,
+            downtime_avoided_min=downtime_minutes,
+            recovery_success=recovery_end_t is not None and recovery_start_t is not None,
+            failure_avoided=scenario.max_degradation < 0.75
         )
-        
-        # Return results with evidence tracker
+
+        # ===== 8. Return results =====
         return SimulationResult(
             config=scenario,
             telemetry_df=telemetry_df,
@@ -446,9 +484,9 @@ class UnifiedSimulationEngine:
             total_units=total_units,
             good_units=good_units,
             scrap_units=scrap_units,
-            availability_pct=round(availability * 100.0, 2),
-            performance_pct=round(min(1.0, performance) * 100.0, 2),
-            quality_pct=round(quality * 100.0, 2),
+            availability_pct=oee_result["availability_pct"],
+            performance_pct=oee_result["performance_pct"],
+            quality_pct=oee_result["quality_pct"],
             oee_pct=round(oee, 2),
             energy_cost_usd=round(energy_cost, 2),
             downtime_cost_usd=round(downtime_cost, 2),
@@ -460,5 +498,5 @@ class UnifiedSimulationEngine:
             resilience=resilience,
             decisions=decisions,
             evidence_traces=evidence_traces,
-            evidence_tracker=evidence_tracker  # NEW: Store tracker for dashboard
+            evidence_tracker=evidence_tracker
         )
