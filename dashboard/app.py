@@ -14,6 +14,8 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import json
+from datetime import datetime
 
 import config
 from core.models import ScenarioConfig
@@ -23,6 +25,9 @@ from control.decision_engine import DecisionEngine
 from maintenance.policies import FactoryPolicySimulator
 from evaluation.ablation import run_ablation_study
 
+# Import EvidenceTracker for display
+from core.evidence import EvidenceTracker
+
 def _get(obj, key, default=0.0):
     """Safely extracts value from either a dataclass object or a dictionary."""
     if hasattr(obj, key):
@@ -30,6 +35,12 @@ def _get(obj, key, default=0.0):
     elif isinstance(obj, dict):
         return obj.get(key, default)
     return default
+
+def safe_column(df, col, default=0):
+    """Safely get a column from DataFrame, return default Series if missing."""
+    if col in df.columns:
+        return df[col]
+    return pd.Series(default, index=df.index)
 
 st.set_page_config(page_title="PRIME-Factory | Control & Decision Center v6.0", layout="wide", page_icon="🏭")
 
@@ -137,20 +148,29 @@ sim_result = UnifiedSimulationEngine.run(scenario_active)
 df_all = sim_result.telemetry_df
 df_target = df_all[df_all["machine_id"] == selected_machine].copy()
 
+# Make sure we have data
+if df_target.empty:
+    st.error(f"No telemetry data found for machine {selected_machine}. Please check the simulation.")
+    st.stop()
+
 df_target_view = df_target[df_target["timestep"] <= time_scrubber].copy()
 latest_row = df_target_view.iloc[-1]
 display_state = latest_row["state"]
 latest_hi = latest_row["health_index"]
 badge = AssetStateMachine.get_state_badge(display_state)
 
-# Decision Engine Trace
+# Decision Engine Trace - with safe value extraction
+rul_minutes = latest_row.get("rul_minutes", -1)
+if pd.isna(rul_minutes) or rul_minutes < 0:
+    rul_minutes = -1
+
 latest_decision = DecisionEngine.evaluate_decision(
     machine_id=selected_machine,
     current_state=display_state,
     health_index=latest_hi,
-    rul_minutes=latest_row["rul_minutes"],
-    is_confirmed_anomaly=bool(latest_row["confirmed_anomaly"]),
-    eci=latest_row["eci"],
+    rul_minutes=int(rul_minutes) if rul_minutes > 0 else -1,
+    is_confirmed_anomaly=bool(latest_row.get("confirmed_anomaly", 0)),
+    eci=latest_row.get("eci", 0.0),
     penalty_contributions=latest_row.get("penalty_contributions", {}),
     product_key=schedule[min(time_scrubber-1, len(schedule)-1)]
 )
@@ -180,9 +200,10 @@ st.divider()
 # ---------------------------------------------------------
 # Operational Tabs
 # ---------------------------------------------------------
-t_live, t_dec, t_whatif, t_resilience, t_events, t_bench, t_ablation, t_report = st.tabs([
+t_live, t_dec, t_evidence, t_whatif, t_resilience, t_events, t_bench, t_ablation, t_report = st.tabs([
     "📈 Live Telemetry",
     "🔍 Decision Trace (XAI Card)",
+    "🔗 Evidence Chain",
     "⚖️ What-If Live Comparison",
     "🛡️ Industrial Resilience",
     "📋 Audit Event Log",
@@ -193,13 +214,22 @@ t_live, t_dec, t_whatif, t_resilience, t_events, t_bench, t_ablation, t_report =
 
 with t_live:
     fig_cond = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, subplot_titles=(f"Physical Telemetry ({selected_machine})", "Composite Health Index & Thresholds"))
-    if config.MACHINES[selected_machine]["has_vibration"]:
+    
+    # Use safe_column to avoid KeyError
+    if "vibration_rms" in df_target_view.columns and config.MACHINES[selected_machine]["has_vibration"]:
         fig_cond.add_trace(go.Scatter(x=df_target_view["timestep"], y=df_target_view["vibration_rms"], name="Vibration (g RMS)", line=dict(color="#1f77b4")), row=1, col=1)
-    fig_cond.add_trace(go.Scatter(x=df_target_view["timestep"], y=df_target_view["temperature_c"], name="Temperature (°C)", line=dict(color="#ff7f0e")), row=1, col=1)
-    fig_cond.add_trace(go.Scatter(x=df_target_view["timestep"], y=df_target_view["power_kw"], name="Power (kW)", line=dict(color="#2ca02c")), row=1, col=1)
-    fig_cond.add_trace(go.Scatter(x=df_target_view["timestep"], y=df_target_view["health_index"], name="Health Index (HI)", line=dict(color="#00cc96", width=2.5)), row=2, col=1)
-    fig_cond.add_hline(y=70, line_dash="dash", line_color="orange", annotation_text="Monitor (70)", row=2, col=1)
-    fig_cond.add_hline(y=50, line_dash="dash", line_color="red", annotation_text="Intervention Threshold (50)", row=2, col=1)
+    
+    if "temperature_c" in df_target_view.columns:
+        fig_cond.add_trace(go.Scatter(x=df_target_view["timestep"], y=df_target_view["temperature_c"], name="Temperature (°C)", line=dict(color="#ff7f0e")), row=1, col=1)
+    
+    if "active_power_kw" in df_target_view.columns:
+        fig_cond.add_trace(go.Scatter(x=df_target_view["timestep"], y=df_target_view["active_power_kw"], name="Power (kW)", line=dict(color="#2ca02c")), row=1, col=1)
+    
+    if "health_index" in df_target_view.columns:
+        fig_cond.add_trace(go.Scatter(x=df_target_view["timestep"], y=df_target_view["health_index"], name="Health Index (HI)", line=dict(color="#00cc96", width=2.5)), row=2, col=1)
+        fig_cond.add_hline(y=70, line_dash="dash", line_color="orange", annotation_text="Monitor (70)", row=2, col=1)
+        fig_cond.add_hline(y=50, line_dash="dash", line_color="red", annotation_text="Intervention Threshold (50)", row=2, col=1)
+    
     fig_cond.update_layout(height=500, margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified")
     st.plotly_chart(fig_cond, use_container_width=True)
 
@@ -220,12 +250,64 @@ with t_dec:
         """)
     with cx2:
         attr_dict = latest_decision.get("penalty_contributions", {})
-        attr_df = pd.DataFrame({
-            "Evidence Modality": list(attr_dict.keys()),
-            "Penalty Contribution (%)": list(attr_dict.values())
-        })
-        if not attr_df.empty:
-            st.plotly_chart(px.bar(attr_df, x="Evidence Modality", y="Penalty Contribution (%)", color="Evidence Modality", title="Sensor & Model Contribution to HI Penalty", text_auto=".1f"), use_container_width=True)
+        if attr_dict:
+            attr_df = pd.DataFrame({
+                "Evidence Modality": list(attr_dict.keys()),
+                "Penalty Contribution (%)": list(attr_dict.values())
+            })
+            if not attr_df.empty:
+                st.plotly_chart(px.bar(attr_df, x="Evidence Modality", y="Penalty Contribution (%)", color="Evidence Modality", title="Sensor & Model Contribution to HI Penalty", text_auto=".1f"), use_container_width=True)
+
+with t_evidence:
+    st.subheader(f"🔗 Complete Evidence Chain for {selected_machine}")
+    st.caption("Full causal trace: SENSE → CONTEXT → DETECT → CONFIRM → HEALTH → RUL → DECIDE → ACTION → OUTCOME")
+    
+    evidence_tracker = getattr(sim_result, 'evidence_tracker', None)
+    
+    if evidence_tracker and hasattr(evidence_tracker, 'traces'):
+        machine_traces = evidence_tracker.get_traces_by_machine(selected_machine)
+        
+        if machine_traces:
+            latest_trace = machine_traces[-1]
+            
+            col_meta1, col_meta2, col_meta3 = st.columns(3)
+            col_meta1.metric("Trace ID", latest_trace.trace_id)
+            col_meta2.metric("Start Time", f"t={latest_trace.start_timestamp} min")
+            col_meta3.metric("Status", latest_trace.final_outcome if latest_trace.final_outcome else "In Progress")
+            
+            st.divider()
+            st.write("### 📜 Evidence Chain Timeline")
+            
+            step_icons = {
+                "SENSE": "📡", "CONTEXT": "📋", "DETECT": "⚠️",
+                "CONFIRM": "✅", "HEALTH": "💚", "RUL": "⏳",
+                "DECIDE": "🎯", "ACTION": "🔧", "OUTCOME": "📊"
+            }
+            
+            for i, step in enumerate(latest_trace.steps):
+                step_type = step.step_type
+                icon = step_icons.get(step_type, "📌")
+                with st.expander(f"{icon} **Step {i+1}: {step_type}** — {step.description[:60]}...", expanded=(i < 3)):
+                    col_step1, col_step2 = st.columns([2, 1])
+                    with col_step1:
+                        st.write(f"**Description:** {step.description}")
+                        st.write(f"**Timestamp:** t={step.timestamp} min")
+                    with col_step2:
+                        st.write(f"**Data:**")
+                        st.json(step.data)
+            
+            st.divider()
+            col_exp1, col_exp2 = st.columns(2)
+            with col_exp1:
+                trace_json = json.dumps(latest_trace.to_dict(), indent=2)
+                st.download_button("📥 Export Trace as JSON", trace_json, f"evidence_trace_{latest_trace.trace_id}.json", "application/json")
+            with col_exp2:
+                df_trace = pd.DataFrame([{"Step": s.step_type, "Timestamp": s.timestamp, "Description": s.description, **s.data} for s in latest_trace.steps])
+                st.download_button("📥 Export Trace as CSV", df_trace.to_csv(index=False).encode('utf-8'), f"evidence_trace_{latest_trace.trace_id}.csv", "text/csv")
+        else:
+            st.info(f"No evidence traces found for machine {selected_machine}.")
+    else:
+        st.warning("Evidence tracker not available.")
 
 with t_whatif:
     st.subheader("⚖️ Dual-Branch What-If Analysis (Intervention vs No Intervention)")
@@ -310,9 +392,28 @@ with t_bench:
 
 with t_ablation:
     st.subheader("🧪 Calibrated Pure Detector Ablation Study (Layers A–E)")
-    ab_df = run_ablation_study(df_target)
-    st.dataframe(ab_df.style.highlight_max(subset=["Precision", "Recall", "F1-Score"], color="#d4edda").highlight_min(subset=["False Alarms/Hr"], color="#d4edda"), use_container_width=True)
-    st.plotly_chart(px.bar(ab_df, x="Architecture Layer", y="F1-Score", color="Architecture Layer", title="F1-Score Across Detector Layers", text_auto=".3f"), use_container_width=True)
+    
+    # FIXED: Run ablation study only if we have enough data
+    # Check if df_target has the required columns, or use the full df_all
+    ablation_df = df_target.copy()
+    
+    # Ensure required columns exist for ablation study
+    required_cols = ['degradation', 'timestep']
+    missing_cols = [col for col in required_cols if col not in ablation_df.columns]
+    
+    if missing_cols:
+        st.warning(f"Missing required columns for ablation study: {missing_cols}. Using fallback data.")
+        # Create fallback data
+        ablation_df['degradation'] = 0.0
+        ablation_df['timestep'] = range(len(ablation_df))
+    
+    try:
+        ab_df = run_ablation_study(ablation_df)
+        st.dataframe(ab_df.style.highlight_max(subset=["Precision", "Recall", "F1-Score"], color="#d4edda").highlight_min(subset=["False Alarms/Hr"], color="#d4edda"), use_container_width=True)
+        st.plotly_chart(px.bar(ab_df, x="Architecture Layer", y="F1-Score", color="Architecture Layer", title="F1-Score Across Detector Layers", text_auto=".3f"), use_container_width=True)
+    except Exception as e:
+        st.error(f"Error running ablation study: {e}")
+        st.info("Ablation study requires telemetry data with degradation, vibration, temperature, and ECI columns.")
 
 with t_report:
     st.subheader("📑 Formal Auto-Generated Experiment Report (Section 19 & 22)")

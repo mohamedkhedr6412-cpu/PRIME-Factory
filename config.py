@@ -101,8 +101,71 @@ HI_WEIGHTS = {
     "delta": 0.20   # Physical Thermal & Vibration Penalty
 }
 
-# Standard Benchmark Scenario Configuration (Section 18)
+# ==============================================================================
+# 7. Maintenance & Recovery Parameters (Section 16) - NEW
+# ==============================================================================
+MAINTENANCE_DURATION_MINUTES = 15
+RECOVERY_DURATION_MINUTES = 15
+REPAIR_EFFECTIVENESS = 0.90  # 90% recovery
+
+# ==============================================================================
+# 8. Decision Engine Thresholds (Section 15) - NEW
+# ==============================================================================
+DECISION_CONFIG = {
+    "hi_healthy_threshold": 70.0,
+    "hi_warning_threshold": 50.0,
+    "hi_critical_threshold": 30.0,
+    "hi_failure_threshold": 10.0,
+    "rul_alert_threshold": 30.0,  # minutes
+    "persistence_confirm_threshold": 0.8,
+    "persistence_window": 5,
+    "eci_deviation_threshold": 0.15,
+    "hysteresis_count": 3,  # Number of samples required for state change
+}
+
+# ==============================================================================
+# 9. Cost Parameters (Section 17) - NEW
+# ==============================================================================
+COST_PARAMETERS = {
+    "maintenance_base_cost": 1000.0,  # USD
+    "maintenance_hourly_rate": 150.0,  # USD/hour
+    "downtime_cost_per_hour": 350.0,  # USD/hour
+    "energy_cost_per_kwh": 0.15,  # USD
+    "carbon_cost_per_kg": 0.05,  # USD per kg CO2
+    "pf_penalty_per_point": 50.0,  # USD per 0.01 below target
+}
+
+# ==============================================================================
+# 10. Benchmark Configuration (Section 18) - NEW
+# ==============================================================================
 BENCHMARK_CONFIG = {
+    "fault_machine": "M3",
+    "fault_type": "bearing_wear",
+    "fault_start": 60,  # minutes
+    "max_degradation": 0.85,
+    "seed": 42,
+    "product_schedule": ["Product_B"] * TOTAL_TIMESTEPS,
+    "policy_comparison": [
+        {"name": "Corrective", "predictive": False, "peak_shaving": False},
+        {"name": "Predictive", "predictive": True, "peak_shaving": False},
+        {"name": "Predictive+PeakShaving", "predictive": True, "peak_shaving": True},
+    ]
+}
+
+# ==============================================================================
+# 11. Evidence & Logging (Section 14) - NEW
+# ==============================================================================
+EVIDENCE_CONFIG = {
+    "max_evidence_history": 1000,
+    "export_format": "json",
+    "include_raw_sensors": True,
+    "include_context": True,
+}
+
+# ==============================================================================
+# 12. Standard Benchmark Scenario Configuration (Section 18) - NEW
+# ==============================================================================
+BENCHMARK_SCENARIO = {
     "fault_machine": "M3",
     "fault_start": 60,
     "max_degradation": 0.85,

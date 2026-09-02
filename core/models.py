@@ -1,14 +1,17 @@
 """
 PRIME-Factory Canonical Data Models & System Architecture v6.0
 Strictly implements the unified data objects defined in Section 3 & 17 of Constitution v6.0.
+Updated to support decision engine and evidence tracking.
 """
 
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 import pandas as pd
 
+
 @dataclass
 class ScenarioConfig:
+    """Configuration for a simulation scenario."""
     scenario_id: str
     seed: int
     product_schedule: List[str]
@@ -19,9 +22,12 @@ class ScenarioConfig:
     enable_chaos: bool = False
     enable_peak_shaving: bool = False
     manual_pdm_timestep: Optional[int] = None
+    product_switch_schedule: Optional[List[str]] = None
+
 
 @dataclass
 class SimulationEvent:
+    """Structured event record for audit trail."""
     timestep: int
     event_type: str
     severity: str
@@ -29,18 +35,54 @@ class SimulationEvent:
     message: str
     evidence: Dict[str, Any] = field(default_factory=dict)
     recommended_action: str = ""
+    state_before: Optional[str] = None
+    state_after: Optional[str] = None
+
 
 @dataclass
 class ResilienceMetrics:
+    """Resilience metrics for factory recovery."""
     recovery_time_min: float = 0.0
     production_loss_units: int = 0
     downtime_avoided_min: float = 0.0
     recovery_success: bool = True
     time_to_recover_min: float = 0.0
     failure_avoided: bool = True
+    total_decisions: int = 0
+    critical_decisions: int = 0
+
+
+@dataclass
+class DecisionRecord:
+    """Record of a decision made by the decision engine."""
+    decision_id: str
+    timestamp: int
+    machine_id: str
+    current_state: str
+    health_index: float
+    rul_minutes: Optional[float]
+    recommendation: str
+    priority: str
+    evidence_summary: Dict[str, Any]
+    action_taken: Optional[str] = None
+    action_timestamp: Optional[int] = None
+
+
+@dataclass
+class EvidenceTrace:
+    """Complete evidence trace for a decision."""
+    trace_id: str
+    machine_id: str
+    start_timestamp: int
+    end_timestamp: Optional[int] = None
+    steps: List[Dict] = field(default_factory=list)
+    decision_id: Optional[str] = None
+    final_outcome: Optional[str] = None
+
 
 @dataclass
 class SimulationResult:
+    """Complete simulation results with decision and evidence data."""
     config: ScenarioConfig
     telemetry_df: pd.DataFrame
     events: List[SimulationEvent]
@@ -64,3 +106,6 @@ class SimulationResult:
     energy_per_good_unit_wh: float
     cost_per_good_unit_usd: float
     resilience: ResilienceMetrics
+    decisions: List[DecisionRecord] = field(default_factory=list)
+    evidence_traces: List[EvidenceTrace] = field(default_factory=list)
+    evidence_tracker: Optional[Any] = None  # NEW: Store EvidenceTracker instance
