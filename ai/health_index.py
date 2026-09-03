@@ -1,8 +1,8 @@
 """
-PRIME-Factory Health Index, Evidence Attribution & Trend-Based Rolling RUL Estimator v6.1
+PRIME-Factory Health Index, Evidence Attribution & Trend-Based Rolling RUL Estimator v6.2
 
 Computes composite HI (0-100), bounded dynamic RUL, normalized modality penalty breakdown,
-and RUL validation metrics.
+and RUL validation metrics across multiple prediction origins.
 """
 
 import numpy as np
@@ -128,7 +128,7 @@ def get_hi_confidence(hi: float, history_length: int) -> float:
     return 0.95
 
 
-# ===== RUL VALIDATION (New for Phase 2) =====
+# ===== RUL VALIDATION (Improved for Phase 2) =====
 
 def calculate_actual_time_to_critical(
     degradation_history: List[float],
@@ -188,17 +188,20 @@ def validate_rul(
     }
 
 
-def compute_rul_metrics(
-    rul_estimates: List[Optional[int]],
-    actual_ruls: List[Optional[int]]
+def evaluate_rul_performance(
+    predictions: List[Tuple[Optional[int], Optional[int]]]
 ) -> Dict:
     """
-    Compute aggregate RUL metrics across multiple predictions.
+    Evaluate RUL performance across multiple prediction origins.
+
+    Args:
+        predictions: List of tuples (estimated_rul, actual_time_to_critical)
+
+    Returns:
+        Dict with MAE, RMSE, Bias, Coverage, n_samples
     """
-    valid_pairs = [
-        (e, a) for e, a in zip(rul_estimates, actual_ruls)
-        if e is not None and a is not None
-    ]
+    # Filter out pairs where either value is None
+    valid_pairs = [(e, a) for e, a in predictions if e is not None and a is not None]
 
     if not valid_pairs:
         return {
@@ -232,3 +235,65 @@ def compute_rul_metrics(
         "Coverage": round(coverage, 3),
         "status": "Calculated"
     }
+
+
+# ===== NEW: Multi-point RUL validation for the full trajectory =====
+
+def evaluate_rul_across_trajectory(
+    hi_history: List[float],
+    degradation_history: List[float],
+    prediction_origins: List[int],
+    window_size: int = 15,
+    critical_threshold: float = 0.75
+) -> Dict:
+    """
+    Evaluate RUL at multiple prediction origins across the degradation trajectory.
+
+    Args:
+        hi_history: Full health index history
+        degradation_history: Full degradation history
+        prediction_origins: List of timesteps to evaluate RUL at (e.g., [60, 80, 100, 120])
+        window_size: Window size for RUL estimation
+        critical_threshold: Degradation level considered critical
+
+    Returns:
+        Dict with MAE, RMSE, Bias, Coverage across all origins
+    """
+    predictions = []
+
+    for t in prediction_origins:
+        if t >= len(hi_history) or t >= len(degradation_history):
+            continue
+
+        # Get HI history up to this point
+        hi_up_to_t = hi_history[:t+1]
+
+        # Estimate RUL at this point (using DEGRADING state as default)
+        # Note: In real simulation, we would use the actual state at that time
+        estimated_rul, _ = estimate_rolling_rul(
+            hi_history=hi_up_to_t,
+            current_state=config.STATE_DEGRADING,
+            current_t=t,
+            window_size=window_size
+        )
+
+        # Calculate actual time to critical from this point
+        actual_rul = calculate_actual_time_to_critical(
+            degradation_history=degradation_history,
+            current_t=t,
+            critical_threshold=critical_threshold
+        )
+
+        predictions.append((estimated_rul, actual_rul))
+
+    return evaluate_rul_performance(predictions)
+
+
+# ===== Compatibility for legacy tests =====
+def compute_rul_metrics(
+    rul_estimates: List[Optional[int]],
+    actual_ruls: List[Optional[int]]
+) -> Dict:
+    """Legacy compatibility function."""
+    predictions = list(zip(rul_estimates, actual_ruls))
+    return evaluate_rul_performance(predictions)

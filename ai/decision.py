@@ -1,5 +1,5 @@
 """
-PRIME-Factory Decision Engine v6.1
+PRIME-Factory Decision Engine v6.2
 Canonical decision engine - Single source of truth for all decisions.
 """
 
@@ -78,7 +78,8 @@ class DecisionEngine:
             rul_minutes=rul_minutes,
             eci=eci,
             is_confirmed_anomaly=is_confirmed_anomaly,
-            persistence_ratio=persistence_ratio
+            persistence_ratio=persistence_ratio,
+            context=context
         )
 
         decision = Decision(
@@ -103,7 +104,8 @@ class DecisionEngine:
         rul_minutes: Optional[float],
         eci: float,
         is_confirmed_anomaly: bool,
-        persistence_ratio: float = 0.0
+        persistence_ratio: float = 0.0,
+        context: Optional[Dict] = None
     ) -> tuple:
         """
         Core decision logic.
@@ -138,22 +140,15 @@ class DecisionEngine:
                 health_index=health_index,
                 rul_minutes=rul_minutes,
                 is_confirmed_anomaly=is_confirmed_anomaly,
-                persistence_ratio=persistence_ratio
+                persistence_ratio=persistence_ratio,
+                context=context
             )
 
-            # If trigger conditions met, return HIGH priority
+            # FIXED: Removed RUL bypass. Only trigger if should_trigger returns True.
             if should_trigger:
                 rul_display = f"{rul_minutes:.0f}min" if rul_minutes is not None else "N/A"
                 return (
                     f"PREDICTIVE: Execute PdM now. HI={health_index:.1f}, RUL={rul_display}. "
-                    "Schedule 15-minute intervention.",
-                    "HIGH"
-                )
-
-            # If RUL is less than or equal to 30, treat as HIGH
-            if rul_minutes is not None and rul_minutes <= 30:
-                return (
-                    f"PREDICTIVE: Execute PdM now. HI={health_index:.1f}, RUL={rul_minutes:.0f}min. "
                     "Schedule 15-minute intervention.",
                     "HIGH"
                 )
@@ -215,14 +210,15 @@ class DecisionEngine:
         health_index: float,
         rul_minutes: Optional[float],
         is_confirmed_anomaly: bool,
-        persistence_ratio: float = 0.0
+        persistence_ratio: float = 0.0,
+        context: Optional[Dict] = None
     ) -> bool:
         """
         PdM trigger condition.
 
         Required:
         - Confirmed anomaly
-        - (HI <= threshold OR RUL <= threshold)
+        - (HI <= threshold OR RUL <= threshold OR degradation >= threshold)
         """
         # Require confirmed anomaly
         if config.PDM_REQUIRE_CONFIRMED_ANOMALY and not is_confirmed_anomaly:
@@ -240,6 +236,10 @@ class DecisionEngine:
 
         # Check RUL trigger
         if rul_minutes is not None and rul_minutes <= config.PDM_TRIGGER_RUL:
+            return True
+
+        # NEW: Check degradation trigger (early warning)
+        if context and context.get("degradation", 0.0) >= config.PDM_TRIGGER_DEGRADATION:
             return True
 
         return False
@@ -343,7 +343,6 @@ def evaluate_decision_for_dashboard(
             code = value
             break
 
-    # FIXED: Ensure urgency is correct for HIGH priority
     urgency = urgency_map.get(decision.priority, "LOW")
 
     return {

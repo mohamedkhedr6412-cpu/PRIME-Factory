@@ -1,7 +1,5 @@
 """
-PRIME-Factory Master Configuration File v6.1
-Centralized configuration, parameter taxonomy classification, calibrated physical constants,
-financial inputs, and isolated RNG seeds.
+PRIME-Factory Master Configuration File v6.2
 """
 
 # ==============================================================================
@@ -9,7 +7,7 @@ financial inputs, and isolated RNG seeds.
 # ==============================================================================
 TIME_STEP_MINUTES = 1.0
 SHIFT_HOURS = 8
-TOTAL_TIMESTEPS = int(SHIFT_HOURS * 60)  # 480 observation points
+TOTAL_TIMESTEPS = int(SHIFT_HOURS * 60)
 RANDOM_SEED = 42
 RANDOM_SEEDS = [42, 101, 202]
 
@@ -19,7 +17,7 @@ RANDOM_SEEDS = [42, 101, 202]
 ELECTRICITY_TARIFF_PER_KWH = 0.15
 DOWNTIME_COST_PER_HOUR = 350.0
 CARBON_EMISSION_FACTOR = 0.45
-MAINTENANCE_COST_BASE = 1000.0
+MAINTENANCE_COST_BASE = 250.0
 
 # ==============================================================================
 # 3. Power Quality & Grid Parameters
@@ -96,6 +94,9 @@ HI_THRESHOLDS = {
     "CRITICAL": 10.0
 }
 
+# NEW: Threshold for entering PREDICTIVE_ALERT state (aligned with PDM trigger)
+PREDICTIVE_ALERT_HI_THRESHOLD = 65.0  # Matches PDM_TRIGGER_HI
+
 HI_WEIGHTS = {
     "alpha": 0.30,
     "beta": 0.25,
@@ -106,15 +107,17 @@ HI_WEIGHTS = {
 # ==============================================================================
 # 7. Maintenance & Recovery Parameters
 # ==============================================================================
-MAINTENANCE_DURATION_MINUTES = 15
+MAINTENANCE_DURATION_MINUTES = 10
 RECOVERY_DURATION_MINUTES = 15
-REPAIR_EFFECTIVENESS = 0.90
+RECOVERY_RATE = 0.02
+REPAIR_EFFECTIVENESS = 0.85
 
 # ==============================================================================
 # 8. PdM Trigger Configuration
 # ==============================================================================
-PDM_TRIGGER_HI = 50.0
-PDM_TRIGGER_RUL = 30.0
+PDM_TRIGGER_HI = 65.0
+PDM_TRIGGER_RUL = 50.0
+PDM_TRIGGER_DEGRADATION = 0.45
 PDM_REQUIRE_CONFIRMED_ANOMALY = True
 PDM_REQUIRE_PERSISTENCE = True
 PDM_MIN_LEAD_TIME_MIN = 10.0
@@ -127,7 +130,7 @@ DECISION_CONFIG = {
     "hi_warning_threshold": 50.0,
     "hi_critical_threshold": 30.0,
     "hi_failure_threshold": 10.0,
-    "rul_alert_threshold": 30.0,
+    "rul_alert_threshold": 50.0,
     "persistence_confirm_threshold": 0.80,
     "persistence_window": 5,
     "eci_deviation_threshold": 0.15,
@@ -138,7 +141,7 @@ DECISION_CONFIG = {
 # 10. Cost Parameters
 # ==============================================================================
 COST_PARAMETERS = {
-    "maintenance_base_cost": 1000.0,
+    "maintenance_base_cost": 250.0,
     "maintenance_hourly_rate": 150.0,
     "downtime_cost_per_hour": 350.0,
     "energy_cost_per_kwh": 0.15,
@@ -147,19 +150,26 @@ COST_PARAMETERS = {
 }
 
 # ==============================================================================
-# 11. Benchmark Configuration - FIXED
+# 11. Peak Shaving Configuration
+# ==============================================================================
+PEAK_SHAVING_START = 240
+PEAK_SHAVING_END = 360
+PEAK_SHAVING_DERATE = 0.90
+
+# ==============================================================================
+# 12. Benchmark Configuration
 # ==============================================================================
 BENCHMARK_CONFIG = {
     "fault_machine": "M3",
     "fault_type": "Bearing Wear",
-    "fault_start": 60,  # minutes
+    "fault_start": 60,
     "max_degradation": 0.85,
     "seed": 42,
     "product_schedule": ["Product_B"] * TOTAL_TIMESTEPS,
 }
 
 # ==============================================================================
-# 12. Canonical Telemetry Schema
+# 13. Canonical Telemetry Schema
 # ==============================================================================
 CANONICAL_TELEMETRY_COLS = [
     "machine_id", "timestep", "product", "speed_rpm", "load_factor",
@@ -169,7 +179,7 @@ CANONICAL_TELEMETRY_COLS = [
 ]
 
 # ==============================================================================
-# 13. Bottleneck Production Parameters
+# 14. Bottleneck Production Parameters
 # ==============================================================================
 PRODUCTION_BOTTLENECK_ENABLED = True
 PRODUCTION_USE_MULTIPRODUCT_CYCLE = True

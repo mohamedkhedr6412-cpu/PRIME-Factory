@@ -47,11 +47,38 @@ class PackagingFactory:
         self.paused = False
         self.history = []
 
-    def reset_machine(self, machine_id: str):
-        """Reset a single machine."""
+    def reset_machine(self, machine_id: str, gradual: bool = True):
+        """
+        Reset a single machine.
+        If gradual=True, use gradual recovery instead of instant reset.
+        """
         if machine_id in self.machines:
-            self.machines[machine_id].reset()
-            self._log_event("machine_reset", {"machine_id": machine_id})
+            if gradual:
+                # Start gradual recovery process
+                machine = self.machines[machine_id]
+                machine.degradation_level = 0.05  # Start with small remaining degradation
+                machine.health_index = 95.0
+                machine.current_state = config.STATE_RECOVERY
+                self._log_event("machine_recovery_started", {"machine_id": machine_id})
+            else:
+                # Instant reset (legacy)
+                self.machines[machine_id].reset()
+                self._log_event("machine_reset", {"machine_id": machine_id})
+
+    def step_recovery(self, dt_minutes: float = 1.0):
+        """
+        Step the recovery process for all machines in RECOVERY state.
+        Should be called during each simulation step.
+        """
+        for machine in self.machines.values():
+            if machine.current_state == config.STATE_RECOVERY:
+                still_recovering = machine.recover(
+                    dt_minutes=dt_minutes,
+                    recovery_rate=config.RECOVERY_RATE
+                )
+                if not still_recovering:
+                    # Fully recovered
+                    self._log_event("machine_recovered", {"machine_id": machine.machine_id})
 
     def start(self):
         """Start the simulation."""
@@ -92,6 +119,9 @@ class PackagingFactory:
             machine_records[machine_id] = record
             total_power += machine.power_kw
 
+        # Step recovery for machines in RECOVERY state
+        self.step_recovery(dt_minutes)
+
         # Calculate bottleneck production
         capacities = []
         for mid, machine in self.machines.items():
@@ -99,8 +129,10 @@ class PackagingFactory:
                 prod_cfg = config.PRODUCTS[self.current_product]
                 cycle_time = prod_cfg["base_cycle_time"]
                 speed_factor = prod_cfg["speed_factor"]
-                capacity = speed_factor / cycle_time * 60.0  # units per minute
-                capacity = capacity * (1.0 - 0.3 * machine.degradation_level)
+                
+                # Gradual degradation effect on production
+                degradation_penalty = max(0.0, 1.0 - (0.5 * machine.degradation_level))
+                capacity = (speed_factor / cycle_time * 60.0) * degradation_penalty
                 capacities.append(capacity)
 
         if capacities:
@@ -198,7 +230,7 @@ class PackagingFactory:
                 }
                 for mid, m in self.machines.items()
             },
-            "kpis": {  # ADDED for compatibility
+            "kpis": {
                 "oee": 0.0,
                 "good_units": sum(m.runtime_minutes for m in self.machines.values()) / 60.0 * 60,
                 "total_energy_kwh": sum(m.cumulative_energy_kwh for m in self.machines.values())

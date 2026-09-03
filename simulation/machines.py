@@ -289,3 +289,40 @@ class Machine:
         self.degradation_level = max(0, min(1, self.degradation_level))
         self.clear_fault()
         self.current_state = config.STATE_RECOVERY
+
+    # ===== NEW: Gradual Recovery Methods =====
+    def recover(self, dt_minutes: float, recovery_rate: float = 0.02) -> bool:
+        """
+        Gradual recovery after maintenance.
+        Reduces degradation slowly over time instead of instant reset.
+        
+        Returns:
+            True if still recovering, False if fully recovered.
+        """
+        if self.degradation_level > 0.0:
+            # Reduce degradation gradually
+            reduction = recovery_rate * dt_minutes
+            self.degradation_level = max(0.0, self.degradation_level - reduction)
+            self.health_index = max(0, 100 * (1 - self.degradation_level))
+            
+            # Update state based on new degradation level
+            if self.degradation_level >= 0.75:
+                self.current_state = config.STATE_FAILED
+            elif self.degradation_level >= 0.50:
+                self.current_state = config.STATE_CRITICAL
+            elif self.degradation_level >= 0.15:
+                self.current_state = config.STATE_WARNING
+            elif self.degradation_level > 0.0:
+                self.current_state = config.STATE_DEGRADING
+            else:
+                self.current_state = config.STATE_NORMAL
+            
+            return True  # Still recovering
+        
+        # Fully recovered
+        self.current_state = config.STATE_NORMAL
+        return False  # Fully recovered
+
+    def is_recovered(self) -> bool:
+        """Check if machine has fully recovered from maintenance."""
+        return self.degradation_level <= 0.01 and self.current_state == config.STATE_NORMAL

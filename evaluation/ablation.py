@@ -1,10 +1,10 @@
 """
-PRIME-Factory Scientific Ablation Engine v6.1
+PRIME-Factory Scientific Ablation Engine v6.2
 
 Canonical architecture:
 A = Static physical thresholds
 B = Raw Isolation Forest
-C = Context-conditioned Isolation Forest
+C = Context-conditioned Isolation Forest (FIXED: healthy-only baseline)
 D = Context IF + ECI evidence
 E = Context IF + ECI + persistence
 
@@ -85,44 +85,35 @@ def _prepare_ablation_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
     result = df.copy()
 
-    # FIXED: Map v6.1 telemetry names to ablation expectations
-    # speed_factor is not directly used, we derive speed_rpm from it if available
+    # Map v6.1 telemetry names to ablation expectations
     if "speed_rpm" not in result.columns and "speed_factor" in result.columns:
         result["speed_rpm"] = result["speed_factor"].astype(float) * 1500.0
     elif "speed_rpm" not in result.columns:
-        result["speed_rpm"] = 1500.0  # Default nominal speed
+        result["speed_rpm"] = 1500.0
 
-    # motor_current_a -> current_a
     if "current_a" not in result.columns and "motor_current_a" in result.columns:
         result["current_a"] = result["motor_current_a"].astype(float)
     elif "current_a" not in result.columns:
         result["current_a"] = 0.0
 
-    # active_power_kw -> power_kw
     if "power_kw" not in result.columns and "active_power_kw" in result.columns:
         result["power_kw"] = result["active_power_kw"].astype(float)
 
-    # Create speed_factor for compatibility (if not exists)
     if "speed_factor" not in result.columns and "speed_rpm" in result.columns:
         result["speed_factor"] = result["speed_rpm"] / 1500.0
     elif "speed_factor" not in result.columns:
         result["speed_factor"] = 1.0
 
-    # Create motor_current_a for compatibility (if not exists)
     if "motor_current_a" not in result.columns and "current_a" in result.columns:
         result["motor_current_a"] = result["current_a"]
 
-    # Ensure load_factor exists
     if "load_factor" not in result.columns:
         result["load_factor"] = 1.0
 
-    # Ensure product exists
     if "product" not in result.columns:
         result["product"] = "Product_B"
 
-    # Ensure eci exists
     if "eci" not in result.columns:
-        # Calculate ECI if not present
         from energy.eci import calculate_eci
         result["eci"] = result.apply(
             lambda r: calculate_eci(
@@ -138,10 +129,15 @@ def _prepare_ablation_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def _context_residual_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+def _context_residual_dataframe(
+    df: pd.DataFrame,
+    healthy_df: pd.DataFrame
+) -> pd.DataFrame:
     """
-    Create context-residualized features for Layer C.
-    Residuals are calculated per product to remove context effects.
+    FIXED: Create context-residualized features using ONLY healthy data.
+
+    Residuals are calculated per product from healthy baseline only,
+    preventing data leakage from degraded samples.
     """
     result = df.copy()
 
@@ -161,16 +157,17 @@ def _context_residual_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     else:
         result["power_kw"] = result.get("power_kw", 0.0)
 
-    # Residualize features per product (context normalization)
+    # FIXED: Calculate expected values from healthy data only (per product)
     for col in ["temperature_c", "current_a", "power_kw", "vibration_rms"]:
-        if col in result.columns:
-            # Group by product to get context-specific baselines
-            grouped = result.groupby("product")[col]
-            # Calculate context-specific expected values (median)
-            expected = grouped.transform("median")
-            result[col] = result[col] - expected
+        if col in result.columns and col in healthy_df.columns:
+            # Group by product to get context-specific baselines from healthy data
+            healthy_expected = healthy_df.groupby("product")[col].median()
+            # Map to result
+            result[col] = result.apply(
+                lambda r: r[col] - healthy_expected.get(r.get("product", "Product_B"), 0.0),
+                axis=1
+            )
 
-    # Load factor and vibration remain as is
     result["load_factor"] = result.get("load_factor", 1.0).astype(float)
 
     return result
@@ -206,7 +203,7 @@ def run_ablation_study(
     - active_power_kw or power_kw, speed_factor or speed_rpm
     - load_factor
     """
-    # FIXED: Prepare dataframe with compatibility mappings
+    # Prepare dataframe with compatibility mappings
     df = _prepare_ablation_dataframe(eval_df).reset_index(drop=True)
 
     # Ground truth: physical degradation onset
@@ -243,10 +240,11 @@ def run_ablation_study(
     y_b = (raw_scores >= raw_detector.threshold).astype(int)
 
     # ------------------------------------------------------------------
-    # Layer C: Context-Conditioned Isolation Forest
+    # Layer C: Context-Conditioned Isolation Forest (FIXED)
     # ------------------------------------------------------------------
-    context_df = _context_residual_dataframe(df)
-    healthy_context = context_df[context_df["degradation"] < GROUND_TRUTH_THRESHOLD].copy()
+    # FIXED: Use healthy data only for context baseline
+    context_df = _context_residual_dataframe(df, healthy)
+    healthy_context = _context_residual_dataframe(healthy, healthy)
 
     context_detector = _fit_detector(healthy_context, seed=seed)
     context_scores = context_detector.predict_anomaly_score(context_df)
@@ -255,16 +253,25 @@ def run_ablation_study(
     # ------------------------------------------------------------------
     # Layer D: Context IF + ECI Fusion
     # ------------------------------------------------------------------
-    # FIXED: Use ECI from prepared dataframe
     eci_threshold = float(config.DECISION_CONFIG.get("eci_deviation_threshold", 0.15))
     
-    # FIXED: Ensure ECI is properly scaled for detection
-    # Use absolute ECI value and compare to threshold
+    if "eci" not in df.columns:
+        from energy.eci import calculate_eci
+        df["eci"] = df.apply(
+            lambda r: calculate_eci(
+                actual_power_kw=r["power_kw"],
+                machine_id=r["machine_id"],
+                product_key=r["product"],
+                load_factor=r.get("load_factor", 1.0),
+                speed_factor=r.get("speed_factor", 1.0)
+            ),
+            axis=1
+        )
+
     eci_evidence = df["eci"].abs() >= eci_threshold
     
-    # FIXED: If no ECI evidence, use a more lenient threshold for ablation
+    # If no ECI evidence, use adaptive threshold
     if eci_evidence.sum() == 0:
-        # Use 50th percentile of absolute ECI as adaptive threshold
         adaptive_threshold = np.percentile(df["eci"].abs(), 80)
         eci_evidence = df["eci"].abs() >= adaptive_threshold
     

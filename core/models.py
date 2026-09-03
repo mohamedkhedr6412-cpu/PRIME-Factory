@@ -1,6 +1,7 @@
 """
 PRIME-Factory Canonical Data Models & System Architecture v6.1
 Strictly implements the unified data objects defined in the Constitution.
+Updated to support decision engine, evidence tracking, and peak shaving.
 """
 
 from dataclasses import dataclass, field
@@ -19,12 +20,12 @@ class ScenarioConfig:
     fault_start: int
     max_degradation: float
 
-    # NEW: Policy type (v6.1)
+    # Policy type (CORRECTIVE, PREVENTIVE, PREDICTIVE)
     policy_type: str = "PREDICTIVE"
 
     # Optional flags
     enable_chaos: bool = False
-    enable_peak_shaving: bool = False
+    enable_peak_shaving: bool = False  # NEW: Peak Shaving flag
 
     # Legacy compatibility (will be deprecated)
     manual_pdm_timestep: Optional[int] = None

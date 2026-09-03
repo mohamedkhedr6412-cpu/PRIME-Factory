@@ -1,5 +1,5 @@
 """
-PRIME-Factory Maintenance Policy Benchmark v6.1
+PRIME-Factory Maintenance Policy Benchmark v6.2
 
 Policies:
 - CORRECTIVE: No intervention until failure
@@ -54,28 +54,26 @@ class FactoryPolicySimulator:
         Run a benchmark for this policy.
 
         NOTE: Predictive is now decision-driven, NOT fixed timestep.
+        Peak Shaving is integrated via ScenarioConfig.
         """
         cfg = custom_config if custom_config is not None else config.BENCHMARK_CONFIG
 
-        # FIXED: Use correct values from config
         fault_start = cfg.get("fault_start", 60)
         max_degradation = cfg.get("max_degradation", 0.85)
         fault_machine = cfg.get("fault_machine", "M3")
         product_schedule = cfg.get("product_schedule", ["Product_B"] * config.TOTAL_TIMESTEPS)
 
-        # FIXED: For PREVENTIVE, set a fixed maintenance interval
+        # For PREVENTIVE, set a fixed maintenance interval
         # For CORRECTIVE, no intervention
         # For PREDICTIVE, let the AI decide
         manual_pdm = None
         
         if self.policy_type == "PREVENTIVE":
-            # Schedule maintenance every 160 minutes
             manual_pdm = 160
         elif self.policy_type == "PREDICTIVE":
-            # Let the AI decide - no manual timestep
             manual_pdm = None
 
-        # FIXED: Create scenario with proper fault injection
+        # FIXED: Create scenario with proper parameters
         scenario = ScenarioConfig(
             scenario_id=f"BENCH_{self.policy_type}_SEED_{self.seed}",
             seed=self.seed,
@@ -110,17 +108,17 @@ class FactoryPolicySimulator:
             max_degradation=max_deg,
         )
 
-        # Predictive intervention
         pred_scenario = ScenarioConfig(
             scenario_id=f"WHATIF_PRED_{seed}",
             policy_type="PREDICTIVE",
+            enable_peak_shaving=False,
             **common,
         )
 
-        # Corrective (no intervention)
         corr_scenario = ScenarioConfig(
             scenario_id=f"WHATIF_CORR_{seed}",
             policy_type="CORRECTIVE",
+            enable_peak_shaving=False,
             **common,
         )
 

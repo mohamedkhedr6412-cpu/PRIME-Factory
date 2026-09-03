@@ -1,7 +1,7 @@
 """
-PRIME-Factory Demand Response & Peak Shaving Module v6.0
-Applies motor speed derating to flexible VFD loads during utility peak tariff hours (Section 10 & 13).
-Integrated with decision engine and evidence tracking.
+PRIME-Factory Demand Response & Peak Shaving Module v6.2
+Applies motor speed derating to flexible VFD loads during utility peak tariff hours.
+Now integrated with production trade-off.
 """
 
 from typing import Dict, Any, Optional
@@ -11,13 +11,14 @@ import config
 class PeakShavingController:
     """
     Controls peak shaving operations for demand response.
+    Tracks the impact on speed, power, and throughput.
     """
-    
+
     def __init__(
         self,
-        peak_start: int = 240,
-        peak_end: int = 360,
-        derate_ratio: float = 0.90,
+        peak_start: int = config.PEAK_SHAVING_START,
+        peak_end: int = config.PEAK_SHAVING_END,
+        derate_ratio: float = config.PEAK_SHAVING_DERATE,
         enabled: bool = True
     ):
         self.peak_start = peak_start
@@ -25,6 +26,7 @@ class PeakShavingController:
         self.derate_ratio = derate_ratio
         self.enabled = enabled
         self._history = []
+        self._peak_events = 0
 
     def apply_peak_shaving(
         self,
@@ -32,16 +34,19 @@ class PeakShavingController:
         current_power: float = None
     ) -> float:
         """
-        Returns the motor speed derating factor during peak electricity tariff windows.
-        Derates commanded speed by 10% (derate_ratio = 0.90) strictly between peak_start and peak_end.
+        Returns the motor speed derating factor during peak hours.
+        Derates commanded speed by derate_ratio (default 0.90 = 10% reduction).
         """
         if not self.enabled:
             self._history.append({"timestep": current_timestep, "factor": 1.0, "applied": False})
             return 1.0
-        
+
         is_peak = self.peak_start <= current_timestep < self.peak_end
         factor = self.derate_ratio if is_peak else 1.0
-        
+
+        if is_peak:
+            self._peak_events += 1
+
         self._history.append({
             "timestep": current_timestep,
             "factor": factor,
@@ -49,28 +54,28 @@ class PeakShavingController:
             "power_before": current_power,
             "power_after": current_power * (factor ** 2) if current_power else None
         })
-        
+
         return float(factor)
 
     def get_peak_shaving_impact(self) -> Dict[str, Any]:
         """
-        Calculates the impact of peak shaving on energy consumption.
+        Calculates the impact of peak shaving on energy consumption and production.
         """
         if not self._history:
             return {"total_events": 0, "avg_derate": 1.0, "energy_saved_kwh": 0.0}
-        
+
         applied = [h for h in self._history if h.get("applied", False)]
-        
+
         if not applied:
             return {"total_events": 0, "avg_derate": 1.0, "energy_saved_kwh": 0.0}
-        
+
         # Calculate energy savings
         total_saved = 0.0
         for h in applied:
             if h.get("power_before") is not None and h.get("power_after") is not None:
                 saved = (h["power_before"] - h["power_after"]) * (config.TIME_STEP_MINUTES / 60.0)
                 total_saved += saved
-        
+
         return {
             "total_events": len(applied),
             "avg_derate": round(sum(h["factor"] for h in applied) / len(applied), 3),
@@ -81,18 +86,19 @@ class PeakShavingController:
     def reset(self):
         """Clear history."""
         self._history = []
+        self._peak_events = 0
 
 
-# ===== Backward compatibility =====
+# ===== Legacy compatibility =====
 
 def apply_peak_shaving(
     current_timestep: int,
-    peak_start: int = 240,
-    peak_end: int = 360,
-    derate_ratio: float = 0.90
+    peak_start: int = config.PEAK_SHAVING_START,
+    peak_end: int = config.PEAK_SHAVING_END,
+    derate_ratio: float = config.PEAK_SHAVING_DERATE
 ) -> float:
     """
-    Returns the motor speed derating factor during peak electricity tariff windows.
+    Returns the motor speed derating factor during peak hours.
     (Legacy function for backward compatibility)
     """
     if peak_start <= current_timestep < peak_end:
@@ -102,9 +108,9 @@ def apply_peak_shaving(
 
 def get_peak_shaving_schedule(
     total_timesteps: int,
-    peak_start: int = 240,
-    peak_end: int = 360,
-    derate_ratio: float = 0.90
+    peak_start: int = config.PEAK_SHAVING_START,
+    peak_end: int = config.PEAK_SHAVING_END,
+    derate_ratio: float = config.PEAK_SHAVING_DERATE
 ) -> list:
     """
     Generates a complete peak shaving schedule for the entire simulation.
