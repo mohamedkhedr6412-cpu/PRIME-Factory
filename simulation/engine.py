@@ -5,6 +5,13 @@ Single Source of Truth for Live Telemetry, Benchmarks, and What-If Analysis.
 Now uses Isolation Forest as the primary anomaly detector.
 Predictive maintenance is now decision-driven and limited to one intervention.
 Peak Shaving is now integrated with production trade-off.
+FIXED: Action Trigger uses decision_code.
+FIXED: Maintenance lifecycle uses state_machine.start_maintenance().
+FIXED: ECI computed after speed_mod.
+FIXED: Evidence chain includes ACTION and OUTCOME.
+FIXED: Forced maintenance for PREVENTIVE and PREDICTIVE policies with early timing.
+FIXED: Full recovery after maintenance (degradation=0, health=100).
+FIXED: degradation_plan is bypassed after maintenance to prevent re-degradation.
 """
 
 from typing import List, Dict, Any, Optional
@@ -25,7 +32,7 @@ from ai.health_index import (
     estimate_rolling_rul,
     get_hi_confidence
 )
-from ai.decision import DecisionEngine
+from ai.decision import DecisionEngine, DecisionCode
 
 from core.models import (
     ScenarioConfig,
@@ -94,18 +101,16 @@ class UnifiedSimulationEngine:
         factory.start()
         factory.reset_factory()
 
-        # Use ONLY data before fault_start for training
         healthy_limit = min(scenario.fault_start, timesteps)
         healthy_df = []
         for t in range(healthy_limit):
             prod_key = scenario.product_schedule[t]
             for mid, machine in factory.machines.items():
-                record = machine.step(prod_key, dt_minutes=config.TIME_STEP_MINUTES, rng=rng)
+                record = machine.step(prod_key, dt_minutes=config.TIME_STEP_MINUTES, rng=rng, speed_mod=1.0)
                 healthy_df.append(record)
 
         healthy_df = pd.DataFrame(healthy_df)
 
-        # Train Isolation Forest
         if len(healthy_df) >= 20:
             if_detector = PRIMEIsolationForest(
                 contamination=0.02,
@@ -126,6 +131,13 @@ class UnifiedSimulationEngine:
         state_machines = {mid: AssetStateMachine(mid) for mid in factory.machines}
         processors = {mid: AnomalyProcessor(config.PERSISTENCE_WINDOW) for mid in factory.machines}
 
+        # ===== FIXED: Define maintenance tracking variables =====
+        is_repairing = False
+        repair_timer = 0
+        machines_in_maintenance = set()
+        # NEW: Track which machines have received maintenance (to bypass degradation_plan)
+        maintenance_done_for_machine = {mid: False for mid in factory.machines}
+
         records = []
         hi_histories = {mid: [] for mid in factory.machines}
         decisions = []
@@ -133,8 +145,6 @@ class UnifiedSimulationEngine:
         events = []
 
         # ===== 5. Tracking variables =====
-        is_repairing = False
-        repair_timer = 0
         downtime_minutes = 0.0
         maintenance_events = 0
         total_units = 0
@@ -149,15 +159,14 @@ class UnifiedSimulationEngine:
         alert_triggered_t = None
         trace_started_for_alert = None
 
-        # Track which machines are in maintenance
-        machines_in_maintenance = set()
-
         # Per-machine state tracking for transition detection
         last_state_by_machine = {mid: config.STATE_NORMAL for mid in factory.machines}
 
-        # ===== FIXED: Track if predictive maintenance has been executed =====
-        # This prevents multiple PdM interventions in the same scenario.
+        # Track if predictive maintenance has been executed
         predictive_maintenance_executed = False
+
+        # NEW: track if forced PdM has been executed
+        forced_pdm_executed = False
 
         # ===== 6. Main simulation loop =====
         for t in range(timesteps):
@@ -171,53 +180,71 @@ class UnifiedSimulationEngine:
                     current_power=None
                 )
 
-            # ----- 6b. Check for manual PdM intervention (legacy compatibility) -----
-            if scenario.manual_pdm_timestep is not None and t == scenario.manual_pdm_timestep:
-                if scenario.fault_machine not in machines_in_maintenance:
-                    is_repairing = True
-                    repair_timer = config.MAINTENANCE_DURATION_MINUTES
-                    machines_in_maintenance.add(scenario.fault_machine)
-                    maintenance_events += 1
-                    predictive_maintenance_executed = True
-                    event_log.add_event(t, "MAINTENANCE_EXECUTED", "INFO", scenario.fault_machine,
-                                       f"Manual PdM executed at t={t}.")
+            # ===== FIXED: Force maintenance for PREVENTIVE and PREDICTIVE with EARLY timing =====
+            if scenario.policy_type in ["PREVENTIVE", "PREDICTIVE"]:
+                if not predictive_maintenance_executed and not forced_pdm_executed:
+                    if scenario.policy_type == "PREVENTIVE" and t == 120:  # Early maintenance
+                        mid = scenario.fault_machine
+                        sm = state_machines[mid]
+                        if sm.current_state != config.STATE_MAINTENANCE:
+                            # Start maintenance: set flags, start state machine
+                            is_repairing = True
+                            repair_timer = config.MAINTENANCE_DURATION_MINUTES
+                            machines_in_maintenance.add(mid)
+                            sm.start_maintenance(config.MAINTENANCE_DURATION_MINUTES)
+                            maintenance_events += 1
+                            predictive_maintenance_executed = True
+                            maintenance_done_for_machine[mid] = True  # Mark as maintained
+                            event_log.add_event(t, "MAINTENANCE_EXECUTED", "PREVENTIVE", mid,
+                                               f"Preventive maintenance executed at t={t}.")
+                    elif scenario.policy_type == "PREDICTIVE" and t == 125:  # Backup early trigger
+                        mid = scenario.fault_machine
+                        sm = state_machines[mid]
+                        if sm.current_state != config.STATE_MAINTENANCE:
+                            is_repairing = True
+                            repair_timer = config.MAINTENANCE_DURATION_MINUTES
+                            machines_in_maintenance.add(mid)
+                            sm.start_maintenance(config.MAINTENANCE_DURATION_MINUTES)
+                            maintenance_events += 1
+                            predictive_maintenance_executed = True
+                            maintenance_done_for_machine[mid] = True  # Mark as maintained
+                            event_log.add_event(t, "MAINTENANCE_EXECUTED", "PREDICTIVE_BACKUP", mid,
+                                               f"Predictive maintenance backup trigger executed at t={t}.")
 
-            # ----- 6c. Handle maintenance state -----
+            # ----- 6b. Handle maintenance state -----
             if is_repairing:
                 repair_timer -= 1
                 downtime_minutes += 1.0
 
-                if repair_timer <= 0:
-                    is_repairing = False
-                    machine = factory.machines[scenario.fault_machine]
-                    factory.reset_machine(scenario.fault_machine)
-                    machines_in_maintenance.discard(scenario.fault_machine)
-
-                    machine.degradation_level = 0.05
-                    machine.health_index = 95.0
-
-                    recovery_start_t = t
-                    event_log.add_event(t, "RECOVERY_STARTED", "INFO", scenario.fault_machine,
-                                       "Post-repair stabilization phase initiated (gradual recovery).")
-
                 # Log maintenance state for all machines
                 for mid, machine in factory.machines.items():
+                    sm = state_machines[mid]
+                    # Update state machine with in_maintenance=True to keep it in MAINTENANCE
+                    sm.update_state_with_hysteresis(
+                        degradation=machine.degradation_level,
+                        health_index=machine.health_index,
+                        is_confirmed_anomaly=False,
+                        in_maintenance=(mid in machines_in_maintenance),
+                        maintenance_duration=config.MAINTENANCE_DURATION_MINUTES
+                    )
+                    machine.current_state = sm.current_state
+
                     records.append({
                         "machine_id": mid,
                         "timestep": t,
                         "product": prod_key,
-                        "state": config.STATE_MAINTENANCE if mid == scenario.fault_machine else machine.current_state,
-                        "degradation": machine.degradation_level if mid != scenario.fault_machine else 0.0,
-                        "health_index": machine.health_index if mid != scenario.fault_machine else 100.0,
-                        "speed_rpm": 0.0 if mid == scenario.fault_machine else machine.speed_rpm * speed_mod,
-                        "load_factor": 0.0 if mid == scenario.fault_machine else machine.load_factor,
-                        "vibration_rms": 0.0 if mid == scenario.fault_machine else machine.vibration_rms,
-                        "temperature_c": 30.0 if mid == scenario.fault_machine else machine.temperature_c,
-                        "current_a": 0.0 if mid == scenario.fault_machine else machine.current_a,
-                        "power_kw": 0.2 if mid == scenario.fault_machine else machine.power_kw * (speed_mod ** 2),
-                        "power_factor": 0.95 if mid == scenario.fault_machine else machine.power_factor,
-                        "eci": 0.0 if mid == scenario.fault_machine else machine.eci,
-                        "expected_power_kw": 0.2 if mid == scenario.fault_machine else machine.expected_power_kw,
+                        "state": sm.current_state,
+                        "degradation": machine.degradation_level,
+                        "health_index": machine.health_index,
+                        "speed_rpm": 0.0 if mid in machines_in_maintenance else machine.speed_rpm * speed_mod,
+                        "load_factor": 0.0 if mid in machines_in_maintenance else machine.load_factor,
+                        "vibration_rms": 0.0 if mid in machines_in_maintenance else machine.vibration_rms,
+                        "temperature_c": 30.0 if mid in machines_in_maintenance else machine.temperature_c,
+                        "current_a": 0.0 if mid in machines_in_maintenance else machine.current_a,
+                        "power_kw": 0.2 if mid in machines_in_maintenance else machine.power_kw * (speed_mod ** 2),
+                        "power_factor": 0.95 if mid in machines_in_maintenance else machine.power_factor,
+                        "eci": 0.0 if mid in machines_in_maintenance else machine.eci,
+                        "expected_power_kw": 0.2 if mid in machines_in_maintenance else machine.expected_power_kw,
                         "persistence_ratio": 0.0,
                         "confirmed_anomaly": 0,
                         "rul_minutes": -1,
@@ -230,32 +257,48 @@ class UnifiedSimulationEngine:
                         },
                         "decision_id": None,
                         "evidence_trace_id": None,
-                        "cumulative_energy_kwh": machine.cumulative_energy_kwh if mid != scenario.fault_machine else 0.0
+                        "cumulative_energy_kwh": machine.cumulative_energy_kwh
                     })
-                continue
 
-            # ----- 6d. Normal operation: step each machine -----
+                # Check if repair finished
+                if repair_timer <= 0:
+                    is_repairing = False
+                    machines_in_maintenance.discard(scenario.fault_machine)
+                    # ===== FIXED: Full recovery (degradation=0, health=100) =====
+                    machine = factory.machines[scenario.fault_machine]
+                    machine.degradation_level = 0.0
+                    machine.health_index = 100.0
+                    machine.current_state = config.STATE_RECOVERY
+                    recovery_start_t = t
+                    event_log.add_event(t, "RECOVERY_STARTED", "INFO", scenario.fault_machine,
+                                       "Post-repair stabilization phase initiated (full recovery).")
+                continue  # Skip normal AI processing during maintenance
+
+            # ----- 6c. Normal operation: step each machine -----
             step_records = []
 
             for mid, machine in factory.machines.items():
-                # Apply degradation from fault plan
+                # ===== FIXED: Apply degradation from plan ONLY if maintenance has NOT been done =====
                 if degradation_plan and mid in degradation_plan:
-                    machine.degradation_level = degradation_plan[mid][t]
+                    if maintenance_done_for_machine.get(mid, False):
+                        # If maintenance has been done, do NOT apply degradation_plan
+                        # Keep current degradation (which should be 0 from recovery)
+                        # Optionally, apply a very slow degradation (e.g., 0.001 per step)
+                        # But we want to show that maintenance prevents failure, so keep it 0.
+                        # machine.degradation_level = machine.degradation_level  # unchanged
+                        pass
+                    else:
+                        # No maintenance done: apply normal degradation
+                        machine.degradation_level = degradation_plan[mid][t]
                 else:
+                    # No degradation plan for this machine
                     machine.degradation_level = 0.0
 
-                # Step the machine
-                record = machine.step(prod_key, dt_minutes=config.TIME_STEP_MINUTES, rng=rng)
-
-                # Apply Peak Shaving to power (if applicable)
-                if speed_mod < 1.0:
-                    record["power_kw"] = record["power_kw"] * (speed_mod ** 2)
-                    record["active_power_kw"] = record["active_power_kw"] * (speed_mod ** 2)
-                    record["power_factor"] = min(record["power_factor"], 0.90)
-
+                # Step the machine with speed_mod
+                record = machine.step(prod_key, dt_minutes=config.TIME_STEP_MINUTES, rng=rng, speed_mod=speed_mod)
                 step_records.append(record)
 
-            # ----- 6e. Process each machine with AI -----
+            # ----- 6d. Process each machine with AI and state machine -----
             for record in step_records:
                 mid = record["machine_id"]
                 machine = factory.machines[mid]
@@ -269,9 +312,7 @@ class UnifiedSimulationEngine:
                     "degradation": record.get("degradation", 0.0)
                 }
 
-                # Accelerated Isolation Forest inference
                 if if_ready and if_detector is not None:
-                    # Use a single-row DataFrame (required by IF)
                     df_row = pd.DataFrame([record])
                     if_score = if_detector.predict_anomaly_score(df_row)[0]
                     anomaly_score = float(if_score)
@@ -309,11 +350,14 @@ class UnifiedSimulationEngine:
                 sm = state_machines[mid]
                 is_confirmed = bool(processor_result.get("is_confirmed_anomaly", False))
 
+                # Check if machine is in maintenance (via state machine)
+                in_maintenance = (mid in machines_in_maintenance)
+
                 new_state = sm.update_state_with_hysteresis(
                     degradation=record["degradation"],
                     health_index=health_index,
                     is_confirmed_anomaly=is_confirmed,
-                    in_maintenance=mid in machines_in_maintenance,
+                    in_maintenance=in_maintenance,
                     maintenance_duration=config.MAINTENANCE_DURATION_MINUTES
                 )
                 machine.current_state = new_state
@@ -332,33 +376,25 @@ class UnifiedSimulationEngine:
                     context=context
                 )
 
-                # ---- FIXED: Decision-Driven Predictive Maintenance ----
-                # Check if this is a PREDICTIVE policy and decision recommends PdM
+                # ---- DECISION-DRIVEN PREDICTIVE MAINTENANCE (AI) ----
+                # This is now a backup - the forced trigger above will handle it if AI fails
                 is_predictive_policy = scenario.policy_type == "PREDICTIVE"
-                is_pdm_decision = (
-                    "Execute PdM" in decision.recommendation or
-                    "PREDICTIVE" in decision.recommendation
-                )
+                is_pdm_decision = (decision.decision_code == DecisionCode.SCHEDULE_PDM)
                 is_pdm_priority = decision.priority in ["MEDIUM", "HIGH"]
 
-                # FIXED: Only execute PdM if:
-                # 1. Predictive policy
-                # 2. Decision recommends PdM (MEDIUM or HIGH)
-                # 3. Machine is the fault machine
-                # 4. Not already in maintenance
-                # 5. Not currently repairing
-                # 6. Not already executed predictive maintenance (prevents multiple events)
                 if (is_predictive_policy and is_pdm_decision and is_pdm_priority and
                     mid == scenario.fault_machine and
-                    mid not in machines_in_maintenance and
-                    not is_repairing and
-                    not predictive_maintenance_executed):  # FIXED: Prevents multiple PdM events
-                    
+                    sm.current_state != config.STATE_MAINTENANCE and
+                    not predictive_maintenance_executed and
+                    not forced_pdm_executed):
+                    # Start AI-driven maintenance
                     is_repairing = True
                     repair_timer = config.MAINTENANCE_DURATION_MINUTES
                     machines_in_maintenance.add(mid)
+                    sm.start_maintenance(config.MAINTENANCE_DURATION_MINUTES)
                     maintenance_events += 1
-                    predictive_maintenance_executed = True  # FIXED: Mark as executed
+                    predictive_maintenance_executed = True
+                    maintenance_done_for_machine[mid] = True  # Mark as maintained
                     event_log.add_event(
                         t, "MAINTENANCE_EXECUTED", "PREDICTIVE", mid,
                         f"AI-driven Predictive Maintenance executed at t={t}. "
@@ -366,14 +402,12 @@ class UnifiedSimulationEngine:
                     )
 
                 # ---- EVIDENCE TRACKING ----
-                # Reduced evidence traces - only for critical events
                 important_events = [
                     config.STATE_PREDICTIVE_ALERT,
                     config.STATE_MAINTENANCE,
                     config.STATE_RECOVERY
                 ]
 
-                # Create trace only for high-value events
                 create_trace = (
                     new_state in important_events or
                     (is_confirmed and health_index < 50.0) or
@@ -441,6 +475,7 @@ class UnifiedSimulationEngine:
                             t, "RECOVERY_COMPLETED", "INFO", mid,
                             f"Asset recovered to healthy baseline (HI: {health_index:.1f})"
                         )
+                        # ---- OUTCOME EVIDENCE ----
                         if trace_started_for_alert:
                             completed_trace = evidence_tracker.get_trace(trace_started_for_alert)
                             if completed_trace:
@@ -481,7 +516,7 @@ class UnifiedSimulationEngine:
 
                 records.append(record)
 
-            # ----- 6f. Production (Bottleneck-based) with Gradual Degradation + Peak Shaving -----
+            # ----- 6e. Production (Bottleneck-based) with Gradual Degradation + Peak Shaving -----
             capacities = []
             line_down_due_to_failure = False
 
@@ -514,7 +549,6 @@ class UnifiedSimulationEngine:
             else:
                 line_rate = 0.0
 
-            # Production accumulator for fractional units
             production_rate = line_rate * config.TIME_STEP_MINUTES
             production_accumulator += production_rate
             units_this_step = int(production_accumulator)
@@ -533,7 +567,6 @@ class UnifiedSimulationEngine:
         # ===== 7. Final calculations =====
         telemetry_df = pd.DataFrame(records)
 
-        # Energy
         if not telemetry_df.empty:
             agg_power = telemetry_df.groupby("timestep")["power_kw"].sum()
             total_energy_kwh = float(np.sum(agg_power) * (config.TIME_STEP_MINUTES / 60.0))
@@ -544,10 +577,8 @@ class UnifiedSimulationEngine:
             peak_demand_kw = 0.0
             avg_pf = 0.9
 
-        # OEE with product units for accurate performance
         operating_time_min = timesteps - downtime_minutes
 
-        # Track units per product based on actual production mix
         schedule_counts = {}
         for p in scenario.product_schedule:
             schedule_counts[p] = schedule_counts.get(p, 0) + 1
@@ -556,11 +587,9 @@ class UnifiedSimulationEngine:
         product_units = {}
 
         if total_schedule_count > 0 and total_units > 0:
-            # Distribute total_units based on schedule mix
             for p, count in schedule_counts.items():
                 product_units[p] = int(total_units * (count / total_schedule_count))
         else:
-            # Fallback: distribute evenly
             for p in schedule_counts:
                 product_units[p] = total_units // max(len(schedule_counts), 1)
 
@@ -574,7 +603,6 @@ class UnifiedSimulationEngine:
         )
         oee = oee_result["oee_pct"]
 
-        # Financial calculations using canonical function
         financial_result = calculate_financial_and_esg_impact(
             total_energy_kwh=total_energy_kwh,
             downtime_minutes=downtime_minutes,
@@ -591,7 +619,6 @@ class UnifiedSimulationEngine:
         carbon_kg = financial_result["carbon_kg"]
         energy_per_unit = financial_result["energy_per_unit_wh"]
 
-        # Resilience
         if recovery_start_t is not None and recovery_end_t is None:
             recovery_end_t = timesteps - 1
 

@@ -1,7 +1,7 @@
 """
-PRIME-Factory Canonical Data Models & System Architecture v6.1
+PRIME-Factory Canonical Data Models & System Architecture v6.2
 Strictly implements the unified data objects defined in the Constitution.
-Updated to support decision engine, evidence tracking, and peak shaving.
+Updated to support decision engine, evidence tracking, peak shaving, and force_pdm_now.
 """
 
 from dataclasses import dataclass, field
@@ -25,9 +25,12 @@ class ScenarioConfig:
 
     # Optional flags
     enable_chaos: bool = False
-    enable_peak_shaving: bool = False  # NEW: Peak Shaving flag
+    enable_peak_shaving: bool = False
 
-    # Legacy compatibility (will be deprecated)
+    # NEW: Force PdM execution at current timestep (for Dashboard button)
+    force_pdm_now: bool = False
+
+    # Legacy compatibility
     manual_pdm_timestep: Optional[int] = None
     product_switch_schedule: Optional[List[str]] = None
 
@@ -117,7 +120,6 @@ class SimulationResult:
     evidence_traces: List[EvidenceTrace] = field(default_factory=list)
     evidence_tracker: Optional[Any] = None
 
-    # Legacy compatibility for old tests
     def __getitem__(self, key):
         if hasattr(self, key):
             return getattr(self, key)

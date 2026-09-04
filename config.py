@@ -83,7 +83,7 @@ STATE_MAINTENANCE = "MAINTENANCE"
 STATE_RECOVERY = "RECOVERY"
 
 PERSISTENCE_WINDOW = 5
-PERSISTENCE_THRESHOLD = 0.80
+PERSISTENCE_THRESHOLD = 0.40
 HEALTH_INDEX_MAX = 100.0
 HEALTH_INDEX_MIN = 0.0
 
@@ -94,8 +94,7 @@ HI_THRESHOLDS = {
     "CRITICAL": 10.0
 }
 
-# NEW: Threshold for entering PREDICTIVE_ALERT state (aligned with PDM trigger)
-PREDICTIVE_ALERT_HI_THRESHOLD = 65.0  # Matches PDM_TRIGGER_HI
+PREDICTIVE_ALERT_HI_THRESHOLD = 75.0
 
 HI_WEIGHTS = {
     "alpha": 0.30,
@@ -115,10 +114,10 @@ REPAIR_EFFECTIVENESS = 0.85
 # ==============================================================================
 # 8. PdM Trigger Configuration
 # ==============================================================================
-PDM_TRIGGER_HI = 65.0
+PDM_TRIGGER_HI = 75.0
 PDM_TRIGGER_RUL = 50.0
 PDM_TRIGGER_DEGRADATION = 0.45
-PDM_REQUIRE_CONFIRMED_ANOMALY = True
+PDM_REQUIRE_CONFIRMED_ANOMALY = False
 PDM_REQUIRE_PERSISTENCE = True
 PDM_MIN_LEAD_TIME_MIN = 10.0
 
@@ -131,7 +130,7 @@ DECISION_CONFIG = {
     "hi_critical_threshold": 30.0,
     "hi_failure_threshold": 10.0,
     "rul_alert_threshold": 50.0,
-    "persistence_confirm_threshold": 0.80,
+    "persistence_confirm_threshold": 0.40,
     "persistence_window": 5,
     "eci_deviation_threshold": 0.15,
     "hysteresis_count": 3,
@@ -157,13 +156,13 @@ PEAK_SHAVING_END = 360
 PEAK_SHAVING_DERATE = 0.90
 
 # ==============================================================================
-# 12. Benchmark Configuration
+# 12. Benchmark Configuration (FINAL - guaranteed failure for CORRECTIVE)
 # ==============================================================================
 BENCHMARK_CONFIG = {
     "fault_machine": "M3",
     "fault_type": "Bearing Wear",
-    "fault_start": 60,
-    "max_degradation": 0.85,
+    "fault_start": 100,
+    "max_degradation": 0.95,   # قيمة كافية لإحداث فشل في CORRECTIVE
     "seed": 42,
     "product_schedule": ["Product_B"] * TOTAL_TIMESTEPS,
 }

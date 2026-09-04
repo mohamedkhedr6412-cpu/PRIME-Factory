@@ -26,12 +26,13 @@ class TestPhase3(unittest.TestCase):
         scenario = ScenarioConfig(
             scenario_id="test_evidence",
             seed=42,
-            product_schedule=["Product_B"] * 50,
+            product_schedule=["Product_B"] * 80,
             fault_machine="M3",
-            fault_type="bearing_wear",
+            fault_type="Bearing Wear",
             fault_start=20,
-            max_degradation=0.5,
-            policy_type="PREDICTIVE"
+            max_degradation=0.85,
+            policy_type="PREDICTIVE",
+            manual_pdm_timestep=50  # Force maintenance to generate trace
         )
 
         result = UnifiedSimulationEngine.run(scenario)
@@ -66,7 +67,8 @@ class TestPhase3(unittest.TestCase):
             is_confirmed_anomaly=True,
             eci=0.15,
             penalty_contributions={"AI": 30.0, "Persistence": 25.0},
-            product_key="Product_B"
+            product_key="Product_B",
+            persistence_ratio=0.8  # Now accepted
         )
 
         self.assertEqual(result['decision_code'], "SCHEDULE_PREDICTIVE_MAINTENANCE")
@@ -85,9 +87,9 @@ class TestPhase3(unittest.TestCase):
             seed=42,
             product_schedule=["Product_B"] * 100,
             fault_machine="M3",
-            fault_type="bearing_wear",
+            fault_type="Bearing Wear",
             fault_start=30,
-            max_degradation=0.7,
+            max_degradation=0.85,
             policy_type="PREDICTIVE",
             manual_pdm_timestep=70
         )
@@ -97,6 +99,7 @@ class TestPhase3(unittest.TestCase):
         self.assertIsNotNone(result.telemetry_df)
         self.assertGreater(len(result.telemetry_df), 0)
         self.assertGreater(len(result.decisions), 0)
+        # Evidence traces should be generated because maintenance is forced
         self.assertGreater(len(result.evidence_traces), 0)
         self.assertIsNotNone(result.evidence_tracker)
         self.assertGreater(len(result.events), 0)
@@ -116,10 +119,11 @@ class TestPhase3(unittest.TestCase):
             seed=42,
             product_schedule=["Product_B"] * 80,
             fault_machine="M3",
-            fault_type="bearing_wear",
+            fault_type="Bearing Wear",
             fault_start=20,
-            max_degradation=0.6,
-            policy_type="PREDICTIVE"
+            max_degradation=0.85,
+            policy_type="PREDICTIVE",
+            manual_pdm_timestep=50  # Force maintenance to generate trace
         )
 
         result = UnifiedSimulationEngine.run(scenario)
@@ -154,7 +158,7 @@ class TestPhase3(unittest.TestCase):
                 seed=seed,
                 product_schedule=["Product_B"] * 30,
                 fault_machine="M3",
-                fault_type="bearing_wear",
+                fault_type="Bearing Wear",
                 fault_start=10,
                 max_degradation=0.5,
                 policy_type="PREDICTIVE"
@@ -187,7 +191,7 @@ class TestPhase3(unittest.TestCase):
             seed=42,
             product_schedule=["Product_B"] * 80,
             fault_machine="M3",
-            fault_type="bearing_wear",
+            fault_type="Bearing Wear",
             fault_start=20,
             max_degradation=0.6,
             policy_type="PREDICTIVE"

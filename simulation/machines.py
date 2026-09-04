@@ -1,7 +1,8 @@
 """
-PRIME-Factory Machine Simulation v6.1
+PRIME-Factory Machine Simulation v6.2
 Individual machine model with degradation, telemetry generation, and context-awareness.
 Includes non-linear bearing wear physics, dynamic thermal lag, and fault signatures.
+Now supports speed_mod for peak shaving.
 """
 
 import numpy as np
@@ -95,11 +96,13 @@ class Machine:
         self,
         product_key: str,
         dt_minutes: float = 1.0,
-        rng: Optional[np.random.RandomState] = None
+        rng: Optional[np.random.RandomState] = None,
+        speed_mod: float = 1.0
     ) -> Dict:
         """
         Advance machine by one timestep and generate telemetry data.
         Uses canonical telemetry schema.
+        Now accepts speed_mod for peak shaving.
         """
         if rng is None:
             rng = np.random.RandomState()
@@ -111,8 +114,8 @@ class Machine:
         # Apply degradation progression
         self._apply_degradation(dt_minutes, rng)
 
-        # Generate telemetry with degradation effects
-        self._generate_telemetry(dt_minutes, rng, product_config)
+        # Generate telemetry with degradation effects and speed_mod
+        self._generate_telemetry(dt_minutes, rng, product_config, speed_mod)
 
         # Update cumulative energy
         energy_this_step = self.power_kw * dt_minutes / 60.0
@@ -172,15 +175,16 @@ class Machine:
         self,
         dt_minutes: float,
         rng: np.random.RandomState,
-        product_config: dict
+        product_config: dict,
+        speed_mod: float = 1.0
     ):
-        """Generate telemetry values with canonical schema and fault signatures."""
+        """Generate telemetry values with canonical schema, fault signatures, and speed_mod."""
         # Context multipliers
-        speed_mult = product_config["speed_factor"]
+        speed_mult = product_config["speed_factor"] * speed_mod  # Apply speed_mod
         load_mult = product_config["load_factor"]
         power_mult = product_config["nominal_power_mult"]
 
-        # Speed (RPM)
+        # Speed (RPM) - apply speed_mod
         self.speed_rpm = 1500.0 * speed_mult * (1.0 - 0.05 * self.degradation_level)
 
         # Vibration (non-linear, exponent 1.5)
@@ -196,8 +200,8 @@ class Machine:
         temp_drift = (target_temp - self.temperature_c) * (dt_minutes / thermal_tau)
         self.temperature_c += temp_drift + rng.normal(0, 0.05)
 
-        # Power (base)
-        base_power = self.nominal_kw * power_mult * load_mult * speed_mult
+        # Power (base) with speed_mod applied (power ∝ speed²)
+        base_power = self.nominal_kw * power_mult * load_mult * (speed_mult ** 2)
         fault_power = base_power * self.degradation_level * 0.15
         power = base_power + fault_power + rng.normal(0, 0.04)
 
@@ -206,8 +210,8 @@ class Machine:
 
         self.power_kw = max(0.01, power)
 
-        # Expected power (for ECI)
-        self.expected_power_kw = self.nominal_kw * power_mult * load_mult * speed_mult
+        # Expected power (for ECI) - also use speed_mod
+        self.expected_power_kw = self.nominal_kw * power_mult * load_mult * (speed_mult ** 2)
 
         # Power Factor
         base_pf = 0.88 - 0.08 * self.degradation_level
@@ -240,7 +244,7 @@ class Machine:
             self.power_factor = modified.get("power_factor", self.power_factor)
             self.current_a = modified.get("current_a", self.current_a)
 
-        # ECI (using canonical calculation)
+        # ECI (using canonical calculation) - AFTER all modifications
         from energy.eci import calculate_eci
         self.eci = calculate_eci(
             actual_power_kw=self.power_kw,
@@ -250,7 +254,7 @@ class Machine:
             speed_factor=speed_mult
         )
 
-        # Internal state mapping
+        # Internal state mapping (for initial state before state machine)
         if self.degradation_level >= 0.75:
             self.current_state = config.STATE_FAILED
         elif self.degradation_level >= 0.50:
@@ -262,14 +266,7 @@ class Machine:
         else:
             self.current_state = config.STATE_NORMAL
 
-    def inject_fault(
-        self,
-        fault_type: str,
-        severity: float,
-        start_time: float,
-        signature: Optional[Dict] = None
-    ):
-        """Inject a controlled fault with optional signature."""
+    def inject_fault(self, fault_type: str, severity: float, start_time: float, signature: Optional[Dict] = None):
         self.fault_type = fault_type
         self.fault_severity = min(1.0, max(0.1, severity))
         self.fault_start_time = start_time
@@ -277,35 +274,22 @@ class Machine:
         self.degradation_level = max(self.degradation_level, 0.05 * severity)
 
     def clear_fault(self):
-        """Clear the fault."""
         self.fault_type = None
         self.fault_severity = 0.0
         self.fault_start_time = None
         self.fault_signature = None
 
     def perform_maintenance(self, effectiveness: float = config.REPAIR_EFFECTIVENESS):
-        """Perform maintenance to reduce degradation."""
         self.degradation_level = self.degradation_level * (1 - effectiveness)
         self.degradation_level = max(0, min(1, self.degradation_level))
         self.clear_fault()
         self.current_state = config.STATE_RECOVERY
 
-    # ===== NEW: Gradual Recovery Methods =====
     def recover(self, dt_minutes: float, recovery_rate: float = 0.02) -> bool:
-        """
-        Gradual recovery after maintenance.
-        Reduces degradation slowly over time instead of instant reset.
-        
-        Returns:
-            True if still recovering, False if fully recovered.
-        """
         if self.degradation_level > 0.0:
-            # Reduce degradation gradually
             reduction = recovery_rate * dt_minutes
             self.degradation_level = max(0.0, self.degradation_level - reduction)
             self.health_index = max(0, 100 * (1 - self.degradation_level))
-            
-            # Update state based on new degradation level
             if self.degradation_level >= 0.75:
                 self.current_state = config.STATE_FAILED
             elif self.degradation_level >= 0.50:
@@ -316,13 +300,9 @@ class Machine:
                 self.current_state = config.STATE_DEGRADING
             else:
                 self.current_state = config.STATE_NORMAL
-            
-            return True  # Still recovering
-        
-        # Fully recovered
+            return True
         self.current_state = config.STATE_NORMAL
-        return False  # Fully recovered
+        return False
 
     def is_recovered(self) -> bool:
-        """Check if machine has fully recovered from maintenance."""
         return self.degradation_level <= 0.01 and self.current_state == config.STATE_NORMAL

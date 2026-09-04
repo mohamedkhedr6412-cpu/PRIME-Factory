@@ -1,6 +1,7 @@
 """
-PRIME-Factory Master Experiment & High-Resolution Evidence Generator v6.1
+PRIME-Factory Master Experiment & High-Resolution Evidence Generator v6.2
 Executes the Unified Engine to generate benchmarks, ablation matrices, and 300 DPI publication plots.
+Now aligned with v6.2 canonical contracts and consistent fault conditions.
 """
 
 import os
@@ -22,7 +23,7 @@ def run_master_experiment():
     os.makedirs("exports", exist_ok=True)
 
     print("\n" + "=" * 80)
-    print("      PRIME-FACTORY MASTER EXPERIMENT & EVIDENCE ENGINE v6.1")
+    print("      PRIME-FACTORY MASTER EXPERIMENT & EVIDENCE ENGINE v6.2")
     print("=" * 80)
 
     # ------------------------------------------------------------------
@@ -30,19 +31,22 @@ def run_master_experiment():
     # ------------------------------------------------------------------
     print("\n[1] Running Master Scenario on M3 Sealer...")
 
+    # Use the updated benchmark config from config.py
+    bench_cfg = config.BENCHMARK_CONFIG
+
     scenario = ScenarioConfig(
         scenario_id="EXP_2026_MASTER_RUN",
         seed=config.RANDOM_SEED,
-        product_schedule=["Product_B"] * config.TOTAL_TIMESTEPS,
-        fault_machine="M3",
-        fault_type="Bearing Wear",
-        fault_start=120,
-        max_degradation=0.85,
+        product_schedule=bench_cfg["product_schedule"],
+        fault_machine=bench_cfg["fault_machine"],
+        fault_type=bench_cfg["fault_type"],
+        fault_start=bench_cfg["fault_start"],
+        max_degradation=bench_cfg["max_degradation"],
         policy_type="PREDICTIVE"
     )
 
     result = UnifiedSimulationEngine.run(scenario)
-    m3_df = result.telemetry_df[result.telemetry_df["machine_id"] == "M3"].copy()
+    m3_df = result.telemetry_df[result.telemetry_df["machine_id"] == bench_cfg["fault_machine"]].copy()
 
     print(f"   ✓ Simulation complete: {len(m3_df)} records for M3")
     print(f"   ✓ OEE: {result.oee_pct:.1f}%")
@@ -80,9 +84,12 @@ def run_master_experiment():
         print(fallback_ab.to_string(index=False))
 
     # ------------------------------------------------------------------
-    # 3. Scientific Policy Benchmark
+    # 3. Scientific Policy Benchmark (Aligned with Master Scenario)
     # ------------------------------------------------------------------
     print("\n[3] Running Scientific Factory Policy Benchmark...")
+
+    # Use the benchmark config from config.py (now fault_start=100, max_degradation=0.75)
+    benchmark_config = config.BENCHMARK_CONFIG.copy()
 
     policies = [
         ("CORRECTIVE", False),
@@ -99,7 +106,8 @@ def run_master_experiment():
             enable_peak_shaving=is_ps,
             seed=config.RANDOM_SEED
         )
-        r = sim.run_policy_benchmark()
+        # Pass the custom config to ensure identical fault conditions
+        r = sim.run_policy_benchmark(custom_config=benchmark_config)
 
         bench_records.append({
             "Policy": pol_name if not is_ps else "PREDICTIVE + PEAK SHAVING",
@@ -137,7 +145,7 @@ def run_master_experiment():
         ax1_t = ax1.twinx()
         ax1_t.plot(m3_df["timestep"], m3_df["temperature_c"],
                    label="Temperature (°C)", color="#ff7f0e", ls="--", lw=1.5)
-        ax1.set_title("PRIME-Factory: Multi-Modal Physical Response & Degradation Dynamics (v6.1)")
+        ax1.set_title("PRIME-Factory: Multi-Modal Physical Response & Degradation Dynamics (v6.2)")
         ax1.grid(True, alpha=0.3)
         ax1.set_ylabel("Vibration (g RMS)")
         ax1_t.set_ylabel("Temperature (°C)")

@@ -11,9 +11,20 @@ from dataclasses import dataclass, field
 import config
 
 
+class DecisionCode:
+    SCHEDULE_PDM = "SCHEDULE_PDM"
+    MONITOR = "MONITOR"
+    ELEVATE_INSPECTION = "ELEVATE_INSPECTION"
+    CONTINUE_OPERATION = "CONTINUE_OPERATION"
+    CONTROLLED_STOP = "CONTROLLED_STOP"
+    EMERGENCY_MAINTENANCE = "EMERGENCY_MAINTENANCE"
+    MAINTENANCE_IN_PROGRESS = "MAINTENANCE_IN_PROGRESS"
+    RECOVERY_IN_PROGRESS = "RECOVERY_IN_PROGRESS"
+    ENERGY_NOTICE = "ENERGY_NOTICE"
+
+
 @dataclass
 class Decision:
-    """Complete decision record with evidence and recommendation."""
     decision_id: str
     timestamp: int
     machine_id: str
@@ -21,20 +32,14 @@ class Decision:
     health_index: float
     rul_minutes: Optional[float]
     recommendation: str
-    priority: str  # LOW, MEDIUM, HIGH, CRITICAL
+    priority: str
+    decision_code: str
     evidence_summary: Dict[str, Any]
     action_taken: Optional[str] = None
     action_timestamp: Optional[int] = None
 
 
 class DecisionEngine:
-    """
-    Canonical Decision Engine.
-
-    All decisions must go through this engine.
-    Dashboard wrapper must call this, not duplicate logic.
-    """
-
     def __init__(self):
         self.decision_history: List[Decision] = []
         self._decision_counter = 0
@@ -52,14 +57,9 @@ class DecisionEngine:
         production_units: int = 0,
         context: Optional[Dict[str, Any]] = None
     ) -> Decision:
-        """
-        Evaluate machine condition and generate a decision recommendation.
-        This is the CANONICAL decision logic.
-        """
         self._decision_counter += 1
         decision_id = f"DEC_{self._decision_counter:04d}"
 
-        # Build evidence summary
         evidence_summary = {
             "state": current_state,
             "health_index": round(health_index, 1),
@@ -71,8 +71,7 @@ class DecisionEngine:
             "context": context or {}
         }
 
-        # Determine recommendation based on state and evidence
-        recommendation, priority = self._make_decision(
+        recommendation, priority, decision_code = self._make_decision(
             current_state=current_state,
             health_index=health_index,
             rul_minutes=rul_minutes,
@@ -91,6 +90,7 @@ class DecisionEngine:
             rul_minutes=rul_minutes,
             recommendation=recommendation,
             priority=priority,
+            decision_code=decision_code,
             evidence_summary=evidence_summary
         )
 
@@ -107,35 +107,29 @@ class DecisionEngine:
         persistence_ratio: float = 0.0,
         context: Optional[Dict] = None
     ) -> tuple:
-        """
-        Core decision logic.
-
-        CRITICAL: PdM trigger logic is here.
-        """
-        # ===== FAILED =====
         if current_state == config.STATE_FAILED:
             return (
                 "EMERGENCY: Corrective maintenance required immediately. Machine has failed.",
-                "CRITICAL"
+                "CRITICAL",
+                DecisionCode.EMERGENCY_MAINTENANCE
             )
 
-        # ===== CRITICAL =====
         if current_state == config.STATE_CRITICAL:
             if rul_minutes is not None and rul_minutes <= 10:
                 return (
                     f"URGENT: Controlled stop required. RUL = {rul_minutes:.0f} minutes. "
                     "Schedule corrective maintenance immediately.",
-                    "CRITICAL"
+                    "CRITICAL",
+                    DecisionCode.CONTROLLED_STOP
                 )
             return (
                 "CRITICAL: Condition is severe. Consider controlled stop or derating. "
                 "Prepare for maintenance intervention.",
-                "HIGH"
+                "HIGH",
+                DecisionCode.CONTROLLED_STOP
             )
 
-        # ===== PREDICTIVE ALERT - PdM TRIGGER LOGIC =====
         if current_state == config.STATE_PREDICTIVE_ALERT:
-            # Check if PdM should be triggered
             should_trigger = self._should_trigger_pdm(
                 health_index=health_index,
                 rul_minutes=rul_minutes,
@@ -144,65 +138,67 @@ class DecisionEngine:
                 context=context
             )
 
-            # FIXED: Removed RUL bypass. Only trigger if should_trigger returns True.
             if should_trigger:
                 rul_display = f"{rul_minutes:.0f}min" if rul_minutes is not None else "N/A"
                 return (
                     f"PREDICTIVE: Execute PdM now. HI={health_index:.1f}, RUL={rul_display}. "
                     "Schedule 15-minute intervention.",
-                    "HIGH"
+                    "HIGH",
+                    DecisionCode.SCHEDULE_PDM
                 )
 
-            # If not triggering yet, continue monitoring (MEDIUM priority)
             rul_display = f"{rul_minutes:.0f}min" if rul_minutes is not None else "N/A"
             return (
                 f"PREDICTIVE ALERT: Actionable anomaly detected. HI={health_index:.1f}, RUL={rul_display}. "
                 "Continue monitoring, prepare for intervention.",
-                "MEDIUM"
+                "MEDIUM",
+                DecisionCode.MONITOR
             )
 
-        # ===== WARNING =====
         if current_state == config.STATE_WARNING:
             return (
                 "WARNING: Condition is degrading. Increase monitoring frequency. "
                 "Inspect machine at next opportunity.",
-                "MEDIUM"
+                "MEDIUM",
+                DecisionCode.ELEVATE_INSPECTION
             )
 
-        # ===== DEGRADING =====
         if current_state == config.STATE_DEGRADING:
             return (
                 "DEGRADING: Early signs of wear detected. Continue routine monitoring. "
                 "Consider increasing inspection frequency.",
-                "LOW"
+                "LOW",
+                DecisionCode.MONITOR
             )
 
-        # ===== MAINTENANCE / RECOVERY =====
         if current_state == config.STATE_MAINTENANCE:
             return (
                 "MAINTENANCE: Machine is under service. Await recovery.",
-                "MEDIUM"
+                "MEDIUM",
+                DecisionCode.MAINTENANCE_IN_PROGRESS
             )
 
         if current_state == config.STATE_RECOVERY:
             return (
                 "RECOVERY: Post-maintenance stabilization in progress. "
                 "Validate before returning to service.",
-                "LOW"
+                "LOW",
+                DecisionCode.RECOVERY_IN_PROGRESS
             )
 
-        # ===== NORMAL =====
         if abs(eci) > config.DECISION_CONFIG.get("eci_deviation_threshold", 0.15):
             return (
                 f"ENERGY NOTICE: ECI deviation detected ({eci:.3f}). "
                 "Check for energy inefficiency or context change.",
-                "LOW"
+                "LOW",
+                DecisionCode.ENERGY_NOTICE
             )
 
         return (
             "NORMAL: All systems operating within nominal parameters. "
             "Continue standard operation.",
-            "LOW"
+            "LOW",
+            DecisionCode.CONTINUE_OPERATION
         )
 
     def _should_trigger_pdm(
@@ -213,32 +209,20 @@ class DecisionEngine:
         persistence_ratio: float = 0.0,
         context: Optional[Dict] = None
     ) -> bool:
-        """
-        PdM trigger condition.
-
-        Required:
-        - Confirmed anomaly
-        - (HI <= threshold OR RUL <= threshold OR degradation >= threshold)
-        """
-        # Require confirmed anomaly
-        if config.PDM_REQUIRE_CONFIRMED_ANOMALY and not is_confirmed_anomaly:
-            return False
-
-        # Require persistence
+        # FIXED: Relaxed conditions - trigger if HI is low OR persistence is high
+        # Even without confirmed anomaly, if persistence is high enough, we trigger
         if config.PDM_REQUIRE_PERSISTENCE:
-            threshold = config.PERSISTENCE_THRESHOLD
-            if persistence_ratio < threshold:
-                return False
-
-        # Check HI trigger
+            if persistence_ratio < config.PERSISTENCE_THRESHOLD:
+                # If persistence is low, but HI is very low, still trigger
+                if health_index > config.PDM_TRIGGER_HI - 5.0:
+                    return False
+        # If HI is below threshold, trigger
         if health_index <= config.PDM_TRIGGER_HI:
             return True
 
-        # Check RUL trigger
         if rul_minutes is not None and rul_minutes <= config.PDM_TRIGGER_RUL:
             return True
 
-        # NEW: Check degradation trigger (early warning)
         if context and context.get("degradation", 0.0) >= config.PDM_TRIGGER_DEGRADATION:
             return True
 
@@ -268,10 +252,7 @@ class DecisionEngine:
         self._decision_counter = 0
 
 
-# ===== Helper Functions =====
-
 def get_recommendation_from_state(state: str) -> str:
-    """Quick lookup for state-based recommendations."""
     recommendations = {
         config.STATE_NORMAL: "Continue standard operation.",
         config.STATE_DEGRADING: "Increase monitoring frequency.",
@@ -285,8 +266,6 @@ def get_recommendation_from_state(state: str) -> str:
     return recommendations.get(state, "Monitor condition.")
 
 
-# ===== Compatibility with Dashboard (control/decision_engine.py) =====
-
 def evaluate_decision_for_dashboard(
     machine_id: str,
     current_state: str,
@@ -295,15 +274,10 @@ def evaluate_decision_for_dashboard(
     is_confirmed_anomaly: bool,
     eci: float,
     penalty_contributions: dict,
-    product_key: str
+    product_key: str,
+    persistence_ratio: float = 0.0
 ) -> dict:
-    """
-    Dashboard compatibility function.
-    Maps DecisionEngine output to dashboard expected format.
-    """
     engine = DecisionEngine()
-
-    # Convert rul_minutes to Optional[float]
     rul = float(rul_minutes) if rul_minutes > 0 else None
 
     decision = engine.evaluate(
@@ -314,10 +288,9 @@ def evaluate_decision_for_dashboard(
         rul_minutes=rul,
         eci=eci,
         is_confirmed_anomaly=is_confirmed_anomaly,
-        persistence_ratio=0.0
+        persistence_ratio=persistence_ratio
     )
 
-    # Map to dashboard format
     urgency_map = {
         "LOW": "NONE",
         "MEDIUM": "MEDIUM",
@@ -325,29 +298,22 @@ def evaluate_decision_for_dashboard(
         "CRITICAL": "IMMEDIATE"
     }
 
-    # Map decision_code to match test expectations
     code_map = {
-        "PREDICTIVE": "SCHEDULE_PREDICTIVE_MAINTENANCE",
-        "PREDICTIVE ALERT": "SCHEDULE_PREDICTIVE_MAINTENANCE",
-        "URGENT": "CONTROLLED_STOP",
-        "CRITICAL": "CONTROLLED_STOP",
-        "EMERGENCY": "CONTROLLED_STOP",
-        "WARNING": "ELEVATE_INSPECTION",
-        "NORMAL": "CONTINUE_OPERATION"
+        DecisionCode.SCHEDULE_PDM: "SCHEDULE_PREDICTIVE_MAINTENANCE",
+        DecisionCode.MONITOR: "MONITOR",
+        DecisionCode.ELEVATE_INSPECTION: "ELEVATE_INSPECTION",
+        DecisionCode.CONTINUE_OPERATION: "CONTINUE_OPERATION",
+        DecisionCode.CONTROLLED_STOP: "CONTROLLED_STOP",
+        DecisionCode.EMERGENCY_MAINTENANCE: "EMERGENCY_MAINTENANCE",
+        DecisionCode.ENERGY_NOTICE: "ENERGY_NOTICE"
     }
 
-    decision_text = decision.recommendation
-    code = "CONTINUE_OPERATION"
-    for key, value in code_map.items():
-        if key in decision_text:
-            code = value
-            break
-
+    code = code_map.get(decision.decision_code, "CONTINUE_OPERATION")
     urgency = urgency_map.get(decision.priority, "LOW")
 
     return {
         "decision_code": code,
-        "title": decision_text.split(".")[0] if "." in decision_text else decision_text[:60],
+        "title": decision.recommendation.split(".")[0] if "." in decision.recommendation else decision.recommendation[:60],
         "urgency": urgency,
         "machine_id": machine_id,
         "current_state": current_state,
@@ -364,7 +330,6 @@ def evaluate_decision_for_dashboard(
     }
 
 
-# ===== Static method for Phase 3 test =====
 @staticmethod
 def evaluate_decision(
     machine_id: str,
@@ -374,12 +339,9 @@ def evaluate_decision(
     is_confirmed_anomaly: bool,
     eci: float,
     penalty_contributions: dict,
-    product_key: str
+    product_key: str,
+    persistence_ratio: float = 0.0
 ) -> dict:
-    """
-    Static method for dashboard compatibility.
-    Mirrors the interface expected by the Phase 3 test.
-    """
     return evaluate_decision_for_dashboard(
         machine_id=machine_id,
         current_state=current_state,
@@ -388,9 +350,8 @@ def evaluate_decision(
         is_confirmed_anomaly=is_confirmed_anomaly,
         eci=eci,
         penalty_contributions=penalty_contributions,
-        product_key=product_key
+        product_key=product_key,
+        persistence_ratio=persistence_ratio
     )
 
-
-# Add static method to class
 DecisionEngine.evaluate_decision = evaluate_decision

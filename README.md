@@ -1,4 +1,4 @@
-# 🏭 PRIME-Factory v6.0
+# 🏭 PRIME-Factory v6.2
 
 **Smart Multi-Product Packaging Factory - Decision Support System**
 
@@ -10,14 +10,20 @@
 
 PRIME-Factory is a simulation-based Industry 4.0 decision-support prototype for a Smart Multi-Product Packaging Factory. It demonstrates system-level integration of:
 
-- **Predictive Maintenance** - Detect and predict equipment failures
-- **Production Context** - Multi-product scheduling and tracking
-- **Energy Monitoring** - Real-time power consumption and ECI
-- **Decision Support** - Explainable AI recommendations
-- **Maintenance & Recovery** - Causal intervention lifecycle
-- **Factory KPIs** - OEE, throughput, cost, carbon
+Predictive Maintenance – Detect and predict equipment failures (Decision-driven, with explicit action codes)
+
+Production Context – Multi-product scheduling and tracking with bottleneck logic
+
+Energy Monitoring – Real-time power consumption, ECI, and unified PF penalty
+
+Decision Support – Explainable AI recommendations with full evidence chain (SENSE → OUTCOME)
+
+Maintenance & Recovery – Causal intervention lifecycle with full recovery after maintenance
+
+Factory KPIs – OEE, throughput, cost, carbon, and resilience metrics
 
 ### Core Evidence Chain
+
 
 SENSE → CONTEXT → DETECT → CONFIRM → HEALTH → RUL → DECIDE → ACTION → OUTCOME
 
@@ -69,48 +75,46 @@ python test_phase3.py
 python test_phase1.py && python test_phase2.py && python test_phase3.py
 
 📁 Project Structure
+
 PRIME-Factory/
 ├── ai/                        # AI & Anomaly Detection
 │   ├── anomaly.py            # Persistence & temporal filtering
 │   ├── baseline.py           # Layer A: Static thresholds
-│   ├── decision.py           # Decision engine
-│   ├── health_index.py       # HI & RUL calculation
+│   ├── decision.py           # Canonical Decision Engine (v6.2)
+│   ├── health_index.py       # HI, RUL, and RUL Validation
 │   └── isolation_forest.py   # Layer B: Isolation Forest
 │
-├── control/                   # Control & decision engine
-│   └── decision_engine.py    # XAI decision trace for dashboard
+├── control/                   # Control & decision wrapper
+│   └── decision_engine.py    # Dashboard compatibility wrapper
 │
 ├── core/                      # Core models & evidence
-│   ├── models.py             # Data models
+│   ├── models.py             # Data models (ScenarioConfig, etc.)
 │   └── evidence.py           # Evidence tracker (SENSE → ... → OUTCOME)
 │
 ├── dashboard/                 # Streamlit UI
 │   └── app.py                # Main interactive dashboard
 │
-├── docs/                      # Documentation
-│   ├── architecture.md       # System architecture
-│   └── user_guide.md         # User guide
-│
-├── energy/                    # Energy management
+├── energy/                    # Energy management (Single Source of Truth)
 │   ├── eci.py                # Energy Condition Indicator
-│   ├── energy_model.py       # Financial & ESG calculations
-│   └── peak_shaving.py       # Demand response
+│   ├── energy_model.py       # Unified Financial & ESG calculations
+│   └── peak_shaving.py       # Demand response & Peak Shaving Controller
 │
 ├── evaluation/                # Evaluation & benchmarking
-│   └── ablation.py           # Layer A-E ablation study
+│   ├── kpis.py               # Canonical OEE calculation
+│   └── ablation.py           # Layer A-E ablation study (v6.2)
 │
 ├── maintenance/               # Maintenance policies
 │   └── policies.py           # What-if analysis & policy comparison
 │
-├── simulation/                # Factory simulation
-│   ├── engine.py             # Unified simulation engine
-│   ├── factory.py            # Packaging line orchestrator
-│   ├── machines.py           # Individual machine model
-│   ├── state_machine.py      # 8-state asset state machine
+├── simulation/                # Factory simulation (Unified Engine)
+│   ├── engine.py             # **Unified Simulation Engine** (Core)
+│   ├── factory.py            # Packaging line orchestrator (Bottleneck)
+│   ├── machines.py           # Individual machine model (Gradual Recovery)
+│   ├── state_machine.py      # 8-state asset state machine (Hysteresis fixed)
 │   ├── faults.py             # Fault injection profiles
 │   └── events.py             # Event logging
 │
-├── config.py                  # Central configuration
+├── config.py                  # Central configuration (v6.2)
 ├── main.py                    # Master experiment runner
 ├── requirements.txt           # Python dependencies
 ├── test_phase1.py             # Phase 1 tests
@@ -119,8 +123,9 @@ PRIME-Factory/
 └── README.md                  # This file
 
 🎮 Using the Dashboard
+
 Sidebar Controls
-Judge Mode: 3-minute demo flow
+Judge Mode: 3-minute demo flow (Next Demo Step / Reset Pitch)
 
 Product Selection: Choose Product A/B/C
 
@@ -128,9 +133,10 @@ Fault Injection: Select fault type, start time, severity
 
 Machine Selection: Target specific machine
 
-Controls: Run/Pause/Reset/Step
+Controls: Execute PdM (immediate), Reset Line
 
 Dashboard Tabs
+
 Tab	Description
 📈 Live Telemetry	Real-time sensor data and health index
 🔍 Decision Trace	XAI decision card with evidence
@@ -141,6 +147,7 @@ Tab	Description
 📊 Benchmark	Policy comparison
 🧪 Ablation	Layer A-E detector comparison
 📑 Report	Auto-generated experiment report
+
 🧪 Demo: 3-Minute Judge Mode
 
 Time	Action
@@ -171,7 +178,26 @@ C	Context-conditioned Isolation Forest
 D	Context IF + ECI fusion
 E	Full PRIME (Context IF + ECI + Persistence)
 
+📊 Final Benchmark Results (v6.2)
+The following table shows the performance of different maintenance policies under identical fault conditions (fault start at t=100, max degradation=0.95).
+
+Policy	Downtime (min)	Events	OEE (%)	Good Units	Energy (kWh)	Peak (kW)	Total Cost ($)	Carbon (kg CO2)
+CORRECTIVE	181.0	0	50.99%	9,791	216.30	29.87	$1,089.38	97.34
+PREVENTIVE	10.0	1	95.26%	18,290	231.02	52.28	$343.82	103.96
+PREDICTIVE	10.0	1	95.20%	18,278	231.05	52.38	$343.82	103.97
+PREDICTIVE + PEAK SHAVING	10.0	1	92.70%	17,799	220.03	52.38	$342.13	99.02
+
+Key Insights:
+
+Predictive and Preventive policies achieve ~95% OEE compared to only 51% for Corrective.
+
+Total cost is reduced from ~$1,089** to **~$344 (a 68% reduction).
+
+Peak Shaving slightly reduces OEE but lowers cost and carbon footprint.
+
+
 🧪 Running the Master Experiment
+
 python main.py
 
 This generates:
@@ -226,7 +252,7 @@ DECIDE    → Decision recommendation
 ACTION    → Action taken (maintenance, derating, etc.)
 OUTCOME   → Result of action (recovered, failed, etc.)
 
-✅ Acceptance Tests
+✅ Acceptance Tests (All Pass)
 Criterion	Pass Condition
 Baseline	Production, energy, OEE internally consistent
 Control	Judge can run scenario without code editing
@@ -234,8 +260,8 @@ Causality	Controls/faults/decisions create visible events
 State	Machine state changes logically
 Prediction	Predictive alert precedes simulated failure
 Explainability	Alert has readable evidence
-Action	Maintenance executes from UI
-Recovery	Telemetry/state/KPIs change and machine returns
+Action	Maintenance executes from UI (immediate)
+Recovery	Telemetry/state/KPIs change and machine returns to full health
 Energy	Energy/ECI changes consistently
 Impact	Paired outcomes are comparable
 Integrity	Demo cannot alter benchmark tables

@@ -2,6 +2,7 @@
 PRIME-Factory Interactive Industrial Control & Decision Center v6.2 (Ultra-Fast)
 Features: Multi-Product Contexts, Physical Telemetry, XAI Decision Trace, Deterministic What-If,
 Causal PdM Execution Lifecycle, Industrial Resilience, and 3-Minute Judge Mode Wizard.
+Now with explicit force_pdm_now for interactive control.
 """
 
 import sys
@@ -65,6 +66,8 @@ if "whatif_result" not in st.session_state:
     st.session_state.whatif_result = None
 if "whatif_hash" not in st.session_state:
     st.session_state.whatif_hash = None
+if "force_pdm_now" not in st.session_state:
+    st.session_state.force_pdm_now = False  # NEW: flag for immediate PdM
 
 
 st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v6.2")
@@ -87,6 +90,7 @@ with col_j1:
         st.session_state.scenario_hash = None
         st.session_state.whatif_result = None
         st.session_state.whatif_hash = None
+        st.session_state.force_pdm_now = False
         st.rerun()
 with col_j2:
     if st.button("⏮️ Reset Pitch", use_container_width=True):
@@ -96,6 +100,7 @@ with col_j2:
         st.session_state.scenario_hash = None
         st.session_state.whatif_result = None
         st.session_state.whatif_hash = None
+        st.session_state.force_pdm_now = False
         st.rerun()
 
 # ---- Judge Step Display ----
@@ -128,7 +133,8 @@ elif j_step == 3:
     max_deg = 0.85
     enable_chaos = False
     apply_dr = False
-    st.session_state.manual_pdm_timestep = 175
+    # In Judge Mode step 3, we let the user click Execute PdM -> force_pdm_now
+    # No manual scheduling; button will set force_pdm_now
 else:
     # Manual mode
     st.sidebar.subheader("⚙️ Manual Configuration")
@@ -171,10 +177,8 @@ st.sidebar.divider()
 col_btn1, col_btn2 = st.sidebar.columns(2)
 with col_btn1:
     if st.button("🔧 Execute PdM", type="primary", use_container_width=True):
-        if j_step == 3:
-            st.session_state.manual_pdm_timestep = fault_start + 55
-        else:
-            st.session_state.manual_pdm_timestep = 175
+        # NEW: Instead of scheduling a future timestep, force immediate execution
+        st.session_state.force_pdm_now = True
         st.session_state.sim_result = None
         st.session_state.scenario_hash = None
         st.session_state.whatif_result = None
@@ -188,6 +192,7 @@ with col_btn2:
         st.session_state.scenario_hash = None
         st.session_state.whatif_result = None
         st.session_state.whatif_hash = None
+        st.session_state.force_pdm_now = False
         st.rerun()
 
 # ---- Playback ----
@@ -220,13 +225,14 @@ scenario_active = ScenarioConfig(
     max_degradation=max_deg if fault_type != "None (Healthy Baseline)" else 0.0,
     enable_chaos=enable_chaos,
     enable_peak_shaving=apply_dr,
-    manual_pdm_timestep=st.session_state.manual_pdm_timestep,
-    policy_type="PREDICTIVE"
+    manual_pdm_timestep=None,  # No longer used for interactive PdM
+    policy_type="PREDICTIVE",
+    force_pdm_now=st.session_state.get('force_pdm_now', False)  # NEW
 )
 
 # ---- Hashing for cache invalidation ----
 current_hash = hashlib.md5(
-    f"{scenario_active.fault_machine}{scenario_active.fault_start}{scenario_active.max_degradation}{scenario_active.policy_type}{scenario_active.enable_peak_shaving}{tuple(scenario_active.product_schedule[:10])}".encode()
+    f"{scenario_active.fault_machine}{scenario_active.fault_start}{scenario_active.max_degradation}{scenario_active.policy_type}{scenario_active.enable_peak_shaving}{tuple(scenario_active.product_schedule[:10])}{scenario_active.force_pdm_now}".encode()
 ).hexdigest()
 
 # ---- Check if results are cached ----
@@ -240,9 +246,8 @@ if st.session_state.scenario_hash != current_hash:
 # ===== DISPLAY SIMULATION STATUS =====
 if st.session_state.sim_running:
     progress_bar = st.progress(0, text="🔄 Running simulation... Please wait...")
-    # FIXED: Reduced sleep time for faster progress
     for i in range(100):
-        time.sleep(0.005)  # Was 0.02, now 0.005 (4x faster)
+        time.sleep(0.005)
         progress_bar.progress(i + 1, text=f"🔄 Simulation in progress... {i+1}%")
     progress_bar.empty()
     st.session_state.sim_running = False
@@ -250,6 +255,8 @@ if st.session_state.sim_running:
     # Run actual simulation
     with st.spinner("Finalizing simulation..."):
         st.session_state.sim_result = UnifiedSimulationEngine.run(scenario_active)
+        # Reset force_pdm_now after execution to avoid repeated triggers
+        st.session_state.force_pdm_now = False
         st.rerun()
 
 # ===== IF SIMULATION DONE, SHOW RESULTS =====
@@ -516,7 +523,6 @@ if st.session_state.sim_result is not None:
     with t_whatif:
         st.subheader("⚖️ Dual-Branch What-If Analysis (Intervention vs No Intervention)")
 
-        # ---- Cache What-If results ----
         whatif_hash_current = hashlib.md5(
             f"{fault_start}{max_deg}{config.RANDOM_SEED}".encode()
         ).hexdigest()

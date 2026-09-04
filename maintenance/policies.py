@@ -3,8 +3,8 @@ PRIME-Factory Maintenance Policy Benchmark v6.2
 
 Policies:
 - CORRECTIVE: No intervention until failure
-- PREVENTIVE: Fixed interval maintenance (every 160 minutes)
-- PREDICTIVE: AI-driven maintenance (decision-based)
+- PREVENTIVE: Fixed interval maintenance (every 140 minutes)
+- PREDICTIVE: AI-driven maintenance (decision-based) + backup manual trigger
 - PREDICTIVE + PEAK SHAVING: Predictive + energy optimization
 
 All policies use the same seed, schedule, fault, and severity.
@@ -53,27 +53,19 @@ class FactoryPolicySimulator:
         """
         Run a benchmark for this policy.
 
-        NOTE: Predictive is now decision-driven, NOT fixed timestep.
-        Peak Shaving is integrated via ScenarioConfig.
+        FIXED: manual_pdm_timestep is now always None.
+        The maintenance is triggered directly in engine.py based on policy_type and timestep.
         """
         cfg = custom_config if custom_config is not None else config.BENCHMARK_CONFIG
 
-        fault_start = cfg.get("fault_start", 60)
+        fault_start = cfg.get("fault_start", 100)
         max_degradation = cfg.get("max_degradation", 0.85)
         fault_machine = cfg.get("fault_machine", "M3")
         product_schedule = cfg.get("product_schedule", ["Product_B"] * config.TOTAL_TIMESTEPS)
 
-        # For PREVENTIVE, set a fixed maintenance interval
-        # For CORRECTIVE, no intervention
-        # For PREDICTIVE, let the AI decide
+        # No manual PDM timestep; handled in engine.py
         manual_pdm = None
-        
-        if self.policy_type == "PREVENTIVE":
-            manual_pdm = 160
-        elif self.policy_type == "PREDICTIVE":
-            manual_pdm = None
 
-        # FIXED: Create scenario with proper parameters
         scenario = ScenarioConfig(
             scenario_id=f"BENCH_{self.policy_type}_SEED_{self.seed}",
             seed=self.seed,

@@ -1,6 +1,6 @@
 Architecture Layer,Precision,Recall,F1-Score,False Alarms/Hr,Early Lead Time (min),TP,FP,FN,TN,First Detection
-Layer A (Static Thresholds),1.0,0.967,0.983,0.0,0,325,0,11,144,155
-Layer B (Raw Isolation Forest),0.991,1.0,0.996,0.375,3,336,3,0,141,141
-Layer C (Context-Conditioned IF),0.991,1.0,0.996,0.375,3,336,3,0,141,141
-Layer D (Context IF + ECI Fusion),1.0,0.301,0.462,0.0,0,101,0,235,144,379
-Layer E (Full PRIME + Persistence),1.0,0.301,0.462,0.0,0,101,0,235,144,379
+Layer A (Static Thresholds),0.0,0.0,0.0,0.0,0,0,0,12,468,
+Layer B (Raw Isolation Forest),0.545,1.0,0.706,1.25,10,12,10,0,458,112.0
+Layer C (Context-Conditioned IF),0.545,1.0,0.706,1.25,10,12,10,0,458,112.0
+Layer D (Context IF + ECI Fusion),0.2,0.167,0.182,1.0,10,2,8,10,460,112.0
+Layer E (Full PRIME + Persistence),0.222,0.167,0.19,0.875,9,2,7,10,461,113.0
