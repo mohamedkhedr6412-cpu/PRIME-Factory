@@ -523,50 +523,51 @@ exports/
 # 19. Project Structure
 
 PRIME-Factory/
-├── ai/                        # AI & Anomaly Detection
-│   ├── anomaly.py            # Persistence & temporal filtering
-│   ├── baseline.py           # Layer A: Static thresholds
-│   ├── decision.py           # Canonical Decision Engine (v6.2)
-│   ├── health_index.py       # HI, RUL, and RUL Validation
-│   └── isolation_forest.py   # Layer B: Isolation Forest
+├── ai/                                # AI & Anomaly Detection
+│   ├── anomaly.py                     # Persistence & temporal filtering
+│   ├── baseline.py                    # Layer A: Static thresholds
+│   ├── decision.py                    # Canonical Decision Engine (v6.2)
+│   ├── health_index.py                # HI, RUL, and RUL Validation
+│   └── isolation_forest.py            # Layer B: Isolation Forest
 │
-├── control/                   # Control & decision wrapper
-│   └── decision_engine.py    # Dashboard compatibility wrapper
+├── control/                           # Control & decision wrapper
+│   └── decision_engine.py             # Dashboard compatibility wrapper
 │
-├── core/                      # Core models & evidence
-│   ├── models.py             # Data models (ScenarioConfig, etc.)
-│   └── evidence.py           # Evidence tracker (SENSE → ... → OUTCOME)
+├── core/                              # Core models & evidence
+│   ├── evidence.py                    # Evidence tracker (SENSE → ... → OUTCOME)
+│   └── models.py                      # Data models (ScenarioConfig, etc.)
 │
-├── dashboard/                 # Streamlit UI
-│   └── app.py                # Main interactive dashboard
+├── dashboard/                         # Streamlit UI
+│   └── app.py                         # Main interactive dashboard
 │
-├── energy/                    # Energy management (Single Source of Truth)
-│   ├── eci.py                # Energy Condition Indicator
-│   ├── energy_model.py       # Unified Financial & ESG calculations
-│   └── peak_shaving.py       # Demand response & Peak Shaving Controller
+├── energy/                            # Energy management (Single Source of Truth)
+│   ├── eci.py                         # Energy Condition Indicator
+│   ├── energy_model.py                # Unified Financial & ESG calculations
+│   └── peak_shaving.py                # Demand response & Peak Shaving Controller
 │
-├── evaluation/                # Evaluation & benchmarking
-│   ├── kpis.py               # Canonical OEE calculation
-│   └── ablation.py           # Layer A-E ablation study (v6.2)
+├── evaluation/                        # Evaluation & benchmarking
+│   ├── ablation.py                    # Layer A-E ablation study (v6.2)
+│   └── kpis.py                        # Canonical OEE calculation
 │
-├── maintenance/               # Maintenance policies
-│   └── policies.py           # What-if analysis & policy comparison
+├── maintenance/                       # Maintenance policies
+│   └── policies.py                    # What-if analysis & policy comparison
 │
-├── simulation/                # Factory simulation (Unified Engine)
-│   ├── engine.py             # **Unified Simulation Engine** (Core)
-│   ├── factory.py            # Packaging line orchestrator (Bottleneck)
-│   ├── machines.py           # Individual machine model (Gradual Recovery)
-│   ├── state_machine.py      # 8-state asset state machine (Hysteresis fixed)
-│   ├── faults.py             # Fault injection profiles
-│   └── events.py             # Event logging
+├── simulation/                        # Factory simulation (Unified Engine)
+│   ├── engine.py                      # Unified Simulation Engine (Core)
+│   ├── events.py                      # Event logging
+│   ├── factory.py                     # Packaging line orchestrator (Bottleneck)
+│   ├── faults.py                      # Fault injection profiles
+│   ├── machines.py                    # Individual machine model (Gradual Recovery)
+│   └── state_machine.py               # 8-state asset state machine (Hysteresis fixed)
 │
-├── config.py                  # Central configuration (v6.2)
-├── main.py                    # Master experiment runner
-├── requirements.txt           # Python dependencies
-├── test_phase1.py             # Phase 1 tests
-├── test_phase2.py             # Phase 2 tests
-├── test_phase3.py             # Phase 3 tests
-└── README.md                  # This file
+├── config.py                          # Central configuration (v6.2)
+├── main.py                            # Master experiment runner
+├── README.md                          # Project documentation
+├── requirements.txt                   # Python dependencies
+├── test_phase1.py                     # Phase 1 tests
+├── test_phase2.py                     # Phase 2 tests
+└── test_phase3.py                     # Phase 3 tests
+
 
 ---
 
