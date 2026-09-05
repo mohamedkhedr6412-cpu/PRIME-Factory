@@ -521,6 +521,8 @@ exports/
 ---
 
 # 19. Project Structure
+
+```text
 PRIME-Factory/
 ├── ai/                                # AI & Anomaly Detection Pipeline
 │   ├── anomaly.py                     # Temporal filtering and anomaly persistence
@@ -566,6 +568,7 @@ PRIME-Factory/
 ├── test_phase1.py                     # Phase 1 unit tests
 ├── test_phase2.py                     # Phase 2 subsystem tests
 └── test_phase3.py                     # Phase 3 end-to-end integration tests
+```
 
 
 ---
