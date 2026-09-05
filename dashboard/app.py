@@ -2,7 +2,7 @@
 PRIME-Factory Interactive Industrial Control & Decision Center v6.2 (Ultra-Fast)
 Features: Multi-Product Contexts, Physical Telemetry, XAI Decision Trace, Deterministic What-If,
 Causal PdM Execution Lifecycle, Industrial Resilience, and 3-Minute Judge Mode Wizard.
-Now with explicit force_pdm_now for interactive control.
+Now with explicit force_pdm_now for interactive control and lazy-loaded heavy computations.
 """
 
 import sys
@@ -18,6 +18,7 @@ from plotly.subplots import make_subplots
 import json
 import hashlib
 import time
+import functools
 
 import config
 from core.models import ScenarioConfig
@@ -68,6 +69,10 @@ if "whatif_hash" not in st.session_state:
     st.session_state.whatif_hash = None
 if "force_pdm_now" not in st.session_state:
     st.session_state.force_pdm_now = False
+if "benchmark_result" not in st.session_state:
+    st.session_state.benchmark_result = None
+if "ablation_result" not in st.session_state:
+    st.session_state.ablation_result = None
 
 
 st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v6.2")
@@ -91,6 +96,8 @@ with col_j1:
         st.session_state.whatif_result = None
         st.session_state.whatif_hash = None
         st.session_state.force_pdm_now = False
+        st.session_state.benchmark_result = None
+        st.session_state.ablation_result = None
         st.rerun()
 with col_j2:
     if st.button("⏮️ Reset Pitch", use_container_width=True):
@@ -101,6 +108,8 @@ with col_j2:
         st.session_state.whatif_result = None
         st.session_state.whatif_hash = None
         st.session_state.force_pdm_now = False
+        st.session_state.benchmark_result = None
+        st.session_state.ablation_result = None
         st.rerun()
 
 # ---- Judge Step Display ----
@@ -174,13 +183,14 @@ selected_machine = st.sidebar.selectbox(
 st.sidebar.divider()
 col_btn1, col_btn2 = st.sidebar.columns(2)
 with col_btn1:
-    # ===== FIXED: Changed wording from "Execute PdM" to "Apply Recommended PdM" =====
     if st.button("🔧 Apply Recommended PdM", type="primary", use_container_width=True):
         st.session_state.force_pdm_now = True
         st.session_state.sim_result = None
         st.session_state.scenario_hash = None
         st.session_state.whatif_result = None
         st.session_state.whatif_hash = None
+        st.session_state.benchmark_result = None
+        st.session_state.ablation_result = None
         st.rerun()
 with col_btn2:
     if st.button("🔄 Reset Line", use_container_width=True):
@@ -191,6 +201,8 @@ with col_btn2:
         st.session_state.whatif_result = None
         st.session_state.whatif_hash = None
         st.session_state.force_pdm_now = False
+        st.session_state.benchmark_result = None
+        st.session_state.ablation_result = None
         st.rerun()
 
 # ---- Playback ----
@@ -205,6 +217,7 @@ time_scrubber = st.sidebar.slider(
 # ============================================================
 # EXECUTE SIMULATION - OPTIMIZED
 # ============================================================
+
 # Build schedule
 if sim_mode == "Fixed Product Regime":
     schedule = [selected_product] * config.TOTAL_TIMESTEPS
@@ -212,8 +225,24 @@ else:
     from simulation.faults import generate_switching_schedule
     schedule = generate_switching_schedule(config.TOTAL_TIMESTEPS)
 
-# Build scenario
-scenario_active = ScenarioConfig(
+# ---- Improved Hashing: include full schedule, fault_type, enable_chaos ----
+def compute_scenario_hash(scenario):
+    """Compute a deterministic hash for the scenario, excluding force_pdm_now."""
+    # Use all relevant parameters except force_pdm_now
+    hash_input = (
+        scenario.fault_machine,
+        scenario.fault_type,
+        scenario.fault_start,
+        scenario.max_degradation,
+        scenario.policy_type,
+        scenario.enable_peak_shaving,
+        scenario.enable_chaos,
+        tuple(scenario.product_schedule),  # full schedule
+    )
+    return hashlib.md5(str(hash_input).encode()).hexdigest()
+
+# Build scenario (without force_pdm_now for hashing)
+scenario_base = ScenarioConfig(
     scenario_id="LIVE_DASHBOARD_RUN",
     seed=config.RANDOM_SEED,
     product_schedule=schedule,
@@ -225,13 +254,10 @@ scenario_active = ScenarioConfig(
     enable_peak_shaving=apply_dr,
     manual_pdm_timestep=None,
     policy_type="PREDICTIVE",
-    force_pdm_now=st.session_state.get('force_pdm_now', False)
+    force_pdm_now=False  # Will be set separately
 )
 
-# ---- Hashing for cache invalidation ----
-current_hash = hashlib.md5(
-    f"{scenario_active.fault_machine}{scenario_active.fault_start}{scenario_active.max_degradation}{scenario_active.policy_type}{scenario_active.enable_peak_shaving}{tuple(scenario_active.product_schedule[:10])}{scenario_active.force_pdm_now}".encode()
-).hexdigest()
+current_hash = compute_scenario_hash(scenario_base)
 
 # ---- Check if results are cached ----
 if st.session_state.scenario_hash != current_hash:
@@ -239,7 +265,36 @@ if st.session_state.scenario_hash != current_hash:
     st.session_state.scenario_hash = current_hash
     st.session_state.whatif_result = None
     st.session_state.whatif_hash = None
+    st.session_state.benchmark_result = None
+    st.session_state.ablation_result = None
     st.session_state.sim_running = True
+
+# ===== Cached simulation function =====
+@st.cache_data(ttl=3600, show_spinner=False)
+def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
+    """
+    Run the simulation with caching based on scenario hash and force_pdm flag.
+    scenario_dict contains all scenario parameters.
+    """
+    # Reconstruct ScenarioConfig from dict
+    scenario = ScenarioConfig(
+        scenario_id=scenario_dict["scenario_id"],
+        seed=scenario_dict["seed"],
+        product_schedule=scenario_dict["product_schedule"],
+        fault_machine=scenario_dict["fault_machine"],
+        fault_type=scenario_dict["fault_type"],
+        fault_start=scenario_dict["fault_start"],
+        max_degradation=scenario_dict["max_degradation"],
+        enable_chaos=scenario_dict["enable_chaos"],
+        enable_peak_shaving=scenario_dict["enable_peak_shaving"],
+        manual_pdm_timestep=scenario_dict["manual_pdm_timestep"],
+        policy_type=scenario_dict["policy_type"],
+        force_pdm_now=force_pdm
+    )
+    result = UnifiedSimulationEngine.run(scenario)
+    # We need to return a tuple of serializable objects
+    # result contains DataFrames, so we can return them as is (st.cache_data handles DataFrames)
+    return result
 
 # ===== DISPLAY SIMULATION STATUS =====
 if st.session_state.sim_running:
@@ -251,7 +306,23 @@ if st.session_state.sim_running:
     st.session_state.sim_running = False
     
     with st.spinner("Finalizing simulation..."):
-        st.session_state.sim_result = UnifiedSimulationEngine.run(scenario_active)
+        # Prepare scenario dict for caching
+        scenario_dict = {
+            "scenario_id": scenario_base.scenario_id,
+            "seed": scenario_base.seed,
+            "product_schedule": scenario_base.product_schedule,
+            "fault_machine": scenario_base.fault_machine,
+            "fault_type": scenario_base.fault_type,
+            "fault_start": scenario_base.fault_start,
+            "max_degradation": scenario_base.max_degradation,
+            "enable_chaos": scenario_base.enable_chaos,
+            "enable_peak_shaving": scenario_base.enable_peak_shaving,
+            "manual_pdm_timestep": scenario_base.manual_pdm_timestep,
+            "policy_type": scenario_base.policy_type,
+        }
+        force_pdm = st.session_state.get('force_pdm_now', False)
+        st.session_state.sim_result = run_cached_simulation(current_hash, scenario_dict, force_pdm)
+        # Reset force_pdm_now after simulation
         st.session_state.force_pdm_now = False
         st.rerun()
 
@@ -284,7 +355,6 @@ if st.session_state.sim_result is not None:
     if pd.isna(rul_minutes) or rul_minutes < 0:
         rul_minutes = -1
 
-    # ===== FIXED: Pass persistence_ratio to DecisionEngine =====
     latest_decision = DecisionEngine.evaluate_decision(
         machine_id=selected_machine,
         current_state=display_state,
@@ -294,7 +364,7 @@ if st.session_state.sim_result is not None:
         eci=latest_row.get("eci", 0.0),
         penalty_contributions=latest_row.get("penalty_contributions", {}),
         product_key=schedule[min(time_scrubber - 1, len(schedule) - 1)],
-        persistence_ratio=latest_row.get("persistence_ratio", 0.0)  # <-- NEW
+        persistence_ratio=latest_row.get("persistence_ratio", 0.0)
     )
 
     # ============================================================
@@ -510,19 +580,12 @@ if st.session_state.sim_result is not None:
         else:
             st.warning("Evidence tracker not available.")
 
-    # ===== TAB 4: What-If =====
+    # ===== TAB 4: What-If (Lazy) =====
     with t_whatif:
         st.subheader("⚖️ Dual-Branch What-If Analysis (Intervention vs No Intervention)")
 
-        whatif_hash_current = hashlib.md5(
-            f"{fault_start}{max_deg}{config.RANDOM_SEED}".encode()
-        ).hexdigest()
-
-        if st.session_state.whatif_hash != whatif_hash_current:
-            st.session_state.whatif_result = None
-            st.session_state.whatif_hash = whatif_hash_current
-
-        if st.session_state.whatif_result is None:
+        # Button to trigger What-If
+        if st.button("▶️ Run What-If Analysis", key="run_whatif"):
             with st.spinner("Running What-If analysis..."):
                 st.session_state.whatif_result = FactoryPolicySimulator.run_what_if_analysis(
                     product_schedule=["Product_B"] * config.TOTAL_TIMESTEPS,
@@ -530,44 +593,49 @@ if st.session_state.sim_result is not None:
                     max_deg=max_deg,
                     seed=config.RANDOM_SEED
                 )
+                st.rerun()
 
-        whatif_res = st.session_state.whatif_result
+        # Display results if available
+        if st.session_state.whatif_result is not None:
+            whatif_res = st.session_state.whatif_result
 
-        col_w1, col_w2, col_w3, col_w4 = st.columns(4)
-        savings = whatif_res.get("savings", {})
+            col_w1, col_w2, col_w3, col_w4 = st.columns(4)
+            savings = whatif_res.get("savings", {})
 
-        col_w1.metric("⏱️ Downtime Prevented", f"{savings.get('downtime_saved_min', 0.0):.1f} min", delta="Reliability")
-        col_w2.metric("💰 Cost Savings", f"${savings.get('cost_saved_usd', 0.0):.2f}", delta="Financial Protection")
-        col_w3.metric("📈 OEE Gain", f"+{savings.get('oee_gain_pct', 0.0):.2f}%", delta="Productivity")
-        col_w4.metric("🌍 Carbon Avoided", f"{savings.get('carbon_saved_kg', 0.0):.2f} kg CO2", delta="Sustainability")
+            col_w1.metric("⏱️ Downtime Prevented", f"{savings.get('downtime_saved_min', 0.0):.1f} min", delta="Reliability")
+            col_w2.metric("💰 Cost Savings", f"${savings.get('cost_saved_usd', 0.0):.2f}", delta="Financial Protection")
+            col_w3.metric("📈 OEE Gain", f"+{savings.get('oee_gain_pct', 0.0):.2f}%", delta="Productivity")
+            col_w4.metric("🌍 Carbon Avoided", f"{savings.get('carbon_saved_kg', 0.0):.2f} kg CO2", delta="Sustainability")
 
-        no_int = whatif_res["no_intervention"]
-        pred = whatif_res["predictive"]
+            no_int = whatif_res["no_intervention"]
+            pred = whatif_res["predictive"]
 
-        wi_df = pd.DataFrame([
-            {
-                "Path": "🔴 No Intervention (Corrective Breakdown)",
-                "Downtime (min)": _get(no_int, "downtime_min"),
-                "OEE (%)": _get(no_int, "oee_pct"),
-                "Good Units": _get(no_int, "good_units"),
-                "Total Cost ($)": _get(no_int, "total_operational_cost_usd"),
-                "Carbon (kg CO2)": _get(no_int, "carbon_kg")
-            },
-            {
-                "Path": "🟢 Predictive Intervention (PRIME Action)",
-                "Downtime (min)": _get(pred, "downtime_min"),
-                "OEE (%)": _get(pred, "oee_pct"),
-                "Good Units": _get(pred, "good_units"),
-                "Total Cost ($)": _get(pred, "total_operational_cost_usd"),
-                "Carbon (kg CO2)": _get(pred, "carbon_kg")
-            }
-        ])
+            wi_df = pd.DataFrame([
+                {
+                    "Path": "🔴 No Intervention (Corrective Breakdown)",
+                    "Downtime (min)": _get(no_int, "downtime_min"),
+                    "OEE (%)": _get(no_int, "oee_pct"),
+                    "Good Units": _get(no_int, "good_units"),
+                    "Total Cost ($)": _get(no_int, "total_operational_cost_usd"),
+                    "Carbon (kg CO2)": _get(no_int, "carbon_kg")
+                },
+                {
+                    "Path": "🟢 Predictive Intervention (PRIME Action)",
+                    "Downtime (min)": _get(pred, "downtime_min"),
+                    "OEE (%)": _get(pred, "oee_pct"),
+                    "Good Units": _get(pred, "good_units"),
+                    "Total Cost ($)": _get(pred, "total_operational_cost_usd"),
+                    "Carbon (kg CO2)": _get(pred, "carbon_kg")
+                }
+            ])
 
-        st.dataframe(
-            wi_df.style.highlight_max(subset=["OEE (%)", "Good Units"], color="#d4edda")
-                   .highlight_min(subset=["Total Cost ($)", "Downtime (min)"], color="#d4edda"),
-            use_container_width=True
-        )
+            st.dataframe(
+                wi_df.style.highlight_max(subset=["OEE (%)", "Good Units"], color="#d4edda")
+                       .highlight_min(subset=["Total Cost ($)", "Downtime (min)"], color="#d4edda"),
+                use_container_width=True
+            )
+        else:
+            st.info("Click the button above to run the What-If analysis.")
 
     # ===== TAB 5: Resilience =====
     with t_resilience:
@@ -578,7 +646,6 @@ if st.session_state.sim_result is not None:
 
         r_col1.metric("⏱️ Recovery Duration", f"{_get(r_metrics, 'recovery_time_min', 15.0):.1f} min", delta="Post-repair")
         r_col2.metric("📦 Production Loss", f"{_get(r_metrics, 'production_loss_units', 0)} units", delta="Scrap + downtime")
-        # ===== FIXED: Default for recovery_success changed to False =====
         rec_ok = _get(r_metrics, 'recovery_success', False)
         r_col3.metric("✅ Recovery Status", "SUCCESS" if rec_ok else "PENDING", delta="Self-stabilized")
         r_col4.metric(
@@ -608,49 +675,62 @@ if st.session_state.sim_result is not None:
             "text/csv"
         )
 
-    # ===== TAB 7: Benchmark =====
+    # ===== TAB 7: Benchmark (Lazy) =====
     with t_bench:
         st.subheader("📊 Scientific Factory Policy Benchmark")
 
-        pols = [("CORRECTIVE", False), ("PREVENTIVE", False), ("PREDICTIVE", False), ("PREDICTIVE", True)]
-        b_res = []
+        if st.button("▶️ Run Scientific Benchmark", key="run_benchmark"):
+            with st.spinner("Running benchmark simulations..."):
+                pols = [("CORRECTIVE", False), ("PREVENTIVE", False), ("PREDICTIVE", False), ("PREDICTIVE", True)]
+                b_res = []
+                for p_name, p_dr in pols:
+                    sim = FactoryPolicySimulator(policy_type=p_name, enable_peak_shaving=p_dr, seed=config.RANDOM_SEED)
+                    r = sim.run_policy_benchmark()
+                    fail_avoided = False
+                    if hasattr(r, 'resilience') and r.resilience:
+                        if hasattr(r.resilience, 'failure_avoided'):
+                            fail_avoided = r.resilience.failure_avoided
+                        elif isinstance(r.resilience, dict):
+                            fail_avoided = r.resilience.get('failure_avoided', False)
+                    b_res.append({
+                        "Policy": p_name if not p_dr else "PREDICTIVE + PEAK SHAVING",
+                        "Downtime (min)": _get(r, "downtime_min"),
+                        "Events": _get(r, "maintenance_events"),
+                        "OEE (%)": _get(r, "oee_pct"),
+                        "Good Units": _get(r, "good_units"),
+                        "Energy (kWh)": _get(r, "total_energy_kwh"),
+                        "Peak (kW)": _get(r, "peak_demand_kw"),
+                        "Total Cost ($)": _get(r, "total_operational_cost_usd"),
+                        "Carbon (kg CO2)": _get(r, "carbon_kg"),
+                        "Failure Avoided": "✅ Yes" if fail_avoided else "❌ No"
+                    })
+                st.session_state.benchmark_result = pd.DataFrame(b_res)
+                st.rerun()
 
-        for p_name, p_dr in pols:
-            sim = FactoryPolicySimulator(policy_type=p_name, enable_peak_shaving=p_dr, seed=config.RANDOM_SEED)
-            r = sim.run_policy_benchmark()
-            
-            fail_avoided = False
-            if hasattr(r, 'resilience') and r.resilience:
-                if hasattr(r.resilience, 'failure_avoided'):
-                    fail_avoided = r.resilience.failure_avoided
-                elif isinstance(r.resilience, dict):
-                    fail_avoided = r.resilience.get('failure_avoided', False)
-            
-            b_res.append({
-                "Policy": p_name if not p_dr else "PREDICTIVE + PEAK SHAVING",
-                "Downtime (min)": _get(r, "downtime_min"),
-                "Events": _get(r, "maintenance_events"),
-                "OEE (%)": _get(r, "oee_pct"),
-                "Good Units": _get(r, "good_units"),
-                "Energy (kWh)": _get(r, "total_energy_kwh"),
-                "Peak (kW)": _get(r, "peak_demand_kw"),
-                "Total Cost ($)": _get(r, "total_operational_cost_usd"),
-                "Carbon (kg CO2)": _get(r, "carbon_kg"),
-                "Failure Avoided": "✅ Yes" if fail_avoided else "❌ No"
-            })
+        if st.session_state.benchmark_result is not None:
+            st.dataframe(
+                st.session_state.benchmark_result.style.highlight_max(subset=["OEE (%)", "Good Units"], color="#d4edda")
+                                   .highlight_min(subset=["Total Cost ($)", "Peak (kW)"], color="#d4edda"),
+                use_container_width=True
+            )
+        else:
+            st.info("Click the button above to run the benchmark.")
 
-        st.dataframe(
-            pd.DataFrame(b_res).style.highlight_max(subset=["OEE (%)", "Good Units"], color="#d4edda")
-                               .highlight_min(subset=["Total Cost ($)", "Peak (kW)"], color="#d4edda"),
-            use_container_width=True
-        )
-
-    # ===== TAB 8: Ablation =====
+    # ===== TAB 8: Ablation (Lazy) =====
     with t_ablation:
         st.subheader("🧪 Calibrated Pure Detector Ablation Study (Layers A–E)")
 
-        try:
-            ab_df = run_ablation_study(df_target)
+        if st.button("▶️ Run Ablation Study", key="run_ablation"):
+            with st.spinner("Running ablation study..."):
+                try:
+                    ab_df = run_ablation_study(df_target)
+                    st.session_state.ablation_result = ab_df
+                except Exception as e:
+                    st.warning(f"Ablation study failed: {e}")
+                st.rerun()
+
+        if st.session_state.ablation_result is not None:
+            ab_df = st.session_state.ablation_result
             st.dataframe(
                 ab_df.style.highlight_max(subset=["Precision", "Recall", "F1-Score"], color="#d4edda")
                       .highlight_min(subset=["False Alarms/Hr"], color="#d4edda"),
@@ -661,8 +741,8 @@ if st.session_state.sim_result is not None:
                        color="Architecture Layer", title="F1-Score Across Detector Layers", text_auto=".3f"),
                 use_container_width=True
             )
-        except Exception as e:
-            st.warning(f"Ablation study requires telemetry data with degradation, vibration, temperature, and ECI columns.")
+        else:
+            st.info("Click the button above to run the ablation study.")
 
     # ===== TAB 9: Report =====
     with t_report:
@@ -673,13 +753,13 @@ if st.session_state.sim_result is not None:
         with rep1:
             st.write("#### Experiment Metadata")
             st.json({
-                "Scenario_ID": scenario_active.scenario_id,
-                "Target_Asset": scenario_active.fault_machine,
-                "Fault_Type": scenario_active.fault_type,
-                "Inception": scenario_active.fault_start,
-                "Max_Degradation": f"{scenario_active.max_degradation * 100:.1f}%",
-                "Random_Seed": scenario_active.seed,
-                "Policy": scenario_active.policy_type,
+                "Scenario_ID": scenario_base.scenario_id,
+                "Target_Asset": scenario_base.fault_machine,
+                "Fault_Type": scenario_base.fault_type,
+                "Inception": scenario_base.fault_start,
+                "Max_Degradation": f"{scenario_base.max_degradation * 100:.1f}%",
+                "Random_Seed": scenario_base.seed,
+                "Policy": scenario_base.policy_type,
                 "Version": "PRIME-Factory v6.2"
             })
 
