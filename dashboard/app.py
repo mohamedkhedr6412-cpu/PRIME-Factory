@@ -67,7 +67,7 @@ if "whatif_result" not in st.session_state:
 if "whatif_hash" not in st.session_state:
     st.session_state.whatif_hash = None
 if "force_pdm_now" not in st.session_state:
-    st.session_state.force_pdm_now = False  # NEW: flag for immediate PdM
+    st.session_state.force_pdm_now = False
 
 
 st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v6.2")
@@ -133,8 +133,6 @@ elif j_step == 3:
     max_deg = 0.85
     enable_chaos = False
     apply_dr = False
-    # In Judge Mode step 3, we let the user click Execute PdM -> force_pdm_now
-    # No manual scheduling; button will set force_pdm_now
 else:
     # Manual mode
     st.sidebar.subheader("⚙️ Manual Configuration")
@@ -176,8 +174,8 @@ selected_machine = st.sidebar.selectbox(
 st.sidebar.divider()
 col_btn1, col_btn2 = st.sidebar.columns(2)
 with col_btn1:
-    if st.button("🔧 Execute PdM", type="primary", use_container_width=True):
-        # NEW: Instead of scheduling a future timestep, force immediate execution
+    # ===== FIXED: Changed wording from "Execute PdM" to "Apply Recommended PdM" =====
+    if st.button("🔧 Apply Recommended PdM", type="primary", use_container_width=True):
         st.session_state.force_pdm_now = True
         st.session_state.sim_result = None
         st.session_state.scenario_hash = None
@@ -225,9 +223,9 @@ scenario_active = ScenarioConfig(
     max_degradation=max_deg if fault_type != "None (Healthy Baseline)" else 0.0,
     enable_chaos=enable_chaos,
     enable_peak_shaving=apply_dr,
-    manual_pdm_timestep=None,  # No longer used for interactive PdM
+    manual_pdm_timestep=None,
     policy_type="PREDICTIVE",
-    force_pdm_now=st.session_state.get('force_pdm_now', False)  # NEW
+    force_pdm_now=st.session_state.get('force_pdm_now', False)
 )
 
 # ---- Hashing for cache invalidation ----
@@ -252,10 +250,8 @@ if st.session_state.sim_running:
     progress_bar.empty()
     st.session_state.sim_running = False
     
-    # Run actual simulation
     with st.spinner("Finalizing simulation..."):
         st.session_state.sim_result = UnifiedSimulationEngine.run(scenario_active)
-        # Reset force_pdm_now after execution to avoid repeated triggers
         st.session_state.force_pdm_now = False
         st.rerun()
 
@@ -263,7 +259,6 @@ if st.session_state.sim_running:
 if st.session_state.sim_result is not None:
     sim_result = st.session_state.sim_result
 
-    # Extract data
     df_all = sim_result.telemetry_df
     df_target = df_all[df_all["machine_id"] == selected_machine].copy()
 
@@ -274,7 +269,6 @@ if st.session_state.sim_result is not None:
     df_target_view = df_target[df_target["timestep"] <= time_scrubber].copy()
     latest_row = df_target_view.iloc[-1]
 
-    # ===== OPTIMIZATION: Sample data for plotting =====
     MAX_POINTS = 500
     if len(df_target_view) > MAX_POINTS:
         step = len(df_target_view) // MAX_POINTS
@@ -282,17 +276,15 @@ if st.session_state.sim_result is not None:
     else:
         df_plot = df_target_view
 
-    # Latest state
     display_state = latest_row["state"]
     latest_hi = latest_row["health_index"]
     badge = AssetStateMachine.get_state_badge(display_state)
 
-    # RUL handling
     rul_minutes = latest_row.get("rul_minutes", -1)
     if pd.isna(rul_minutes) or rul_minutes < 0:
         rul_minutes = -1
 
-    # Decision Engine Trace
+    # ===== FIXED: Pass persistence_ratio to DecisionEngine =====
     latest_decision = DecisionEngine.evaluate_decision(
         machine_id=selected_machine,
         current_state=display_state,
@@ -301,7 +293,8 @@ if st.session_state.sim_result is not None:
         is_confirmed_anomaly=bool(latest_row.get("confirmed_anomaly", 0)),
         eci=latest_row.get("eci", 0.0),
         penalty_contributions=latest_row.get("penalty_contributions", {}),
-        product_key=schedule[min(time_scrubber - 1, len(schedule) - 1)]
+        product_key=schedule[min(time_scrubber - 1, len(schedule) - 1)],
+        persistence_ratio=latest_row.get("persistence_ratio", 0.0)  # <-- NEW
     )
 
     # ============================================================
@@ -352,7 +345,6 @@ if st.session_state.sim_result is not None:
     else:
         st.success(f"✅ **{badge['label']}** | **Action:** {badge['action']}")
 
-    # ---- Judge Mode Progress ----
     if j_step > 0:
         progress_text = {
             1: "🟢 Step 1/3: Healthy Baseline (0:00-0:20)",
@@ -362,7 +354,6 @@ if st.session_state.sim_result is not None:
         st.progress(j_step / 3.0, text=progress_text.get(j_step, ""))
 
     st.divider()
-
 
     # ============================================================
     # TABS
@@ -519,7 +510,7 @@ if st.session_state.sim_result is not None:
         else:
             st.warning("Evidence tracker not available.")
 
-    # ===== TAB 4: What-If (CACHED) =====
+    # ===== TAB 4: What-If =====
     with t_whatif:
         st.subheader("⚖️ Dual-Branch What-If Analysis (Intervention vs No Intervention)")
 
@@ -587,7 +578,8 @@ if st.session_state.sim_result is not None:
 
         r_col1.metric("⏱️ Recovery Duration", f"{_get(r_metrics, 'recovery_time_min', 15.0):.1f} min", delta="Post-repair")
         r_col2.metric("📦 Production Loss", f"{_get(r_metrics, 'production_loss_units', 0)} units", delta="Scrap + downtime")
-        rec_ok = _get(r_metrics, 'recovery_success', True)
+        # ===== FIXED: Default for recovery_success changed to False =====
+        rec_ok = _get(r_metrics, 'recovery_success', False)
         r_col3.metric("✅ Recovery Status", "SUCCESS" if rec_ok else "PENDING", delta="Self-stabilized")
         r_col4.metric(
             "🛡️ Failure Avoided",

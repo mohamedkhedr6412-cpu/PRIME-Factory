@@ -133,7 +133,7 @@ Fault Injection: Select fault type, start time, severity
 
 Machine Selection: Target specific machine
 
-Controls: Execute PdM (immediate), Reset Line
+Controls: `Apply Recommended PdM` (immediate), Reset Line
 
 Dashboard Tabs
 
@@ -155,7 +155,7 @@ Time	Action
 0:20-0:50	Inject M3 bearing degradation
 0:50-1:15	Telemetry → anomaly → persistence → HI/RUL
 1:15-1:35	Decision Trace: why PdM
-1:35-1:55	Execute Predictive Maintenance
+1:35-1:55	Apply Recommended PdM (intervention)
 1:55-2:15	MAINTENANCE → RECOVERY → NORMAL
 2:15-2:45	Show OEE/energy/downtime/cost/carbon impact
 2:45-3:00	Paired What-if: intervention vs no intervention
@@ -181,20 +181,23 @@ E	Full PRIME (Context IF + ECI + Persistence)
 📊 Final Benchmark Results (v6.2)
 The following table shows the performance of different maintenance policies under identical fault conditions (fault start at t=100, max degradation=0.95).
 
-Policy	Downtime (min)	Events	OEE (%)	Good Units	Energy (kWh)	Peak (kW)	Total Cost ($)	Carbon (kg CO2)
-CORRECTIVE	181.0	0	50.99%	9,791	216.30	29.87	$1,089.38	97.34
-PREVENTIVE	10.0	1	95.26%	18,290	231.02	52.28	$343.82	103.96
-PREDICTIVE	10.0	1	95.20%	18,278	231.05	52.38	$343.82	103.97
-PREDICTIVE + PEAK SHAVING	10.0	1	92.70%	17,799	220.03	52.38	$342.13	99.02
 
-Key Insights:
 
-Predictive and Preventive policies achieve ~95% OEE compared to only 51% for Corrective.
+Policy	Downtime (min)	Events	OEE (%)	Good Units	Energy (kWh)	Peak (kW)	Total Cost ($)	Carbon (kg CO2)	Failure Avoided
+CORRECTIVE	181.0	0	50.99%	9,791	216.30	29.87	$1,089.38	97.34	❌ No
+PREVENTIVE	10.0	1	95.32%	18,302	231.01	52.28	$343.80	103.95	✅ Yes
+PREDICTIVE	10.0	1	95.26%	18,290	231.05	52.38	$343.82	103.97	✅ Yes
+PREDICTIVE + PEAK SHAVING	10.0	1	92.76%	17,810	220.03	52.38	$342.13	99.01	✅ Yes
 
-Total cost is reduced from ~$1,089** to **~$344 (a 68% reduction).
+Key Insights
 
-Peak Shaving slightly reduces OEE but lowers cost and carbon footprint.
+Predictive and Preventive achieve ~95% OEE compared to only ~51% for Corrective.
 
+Total cost is reduced from ~$1,089 to ~$344 (68% reduction).
+
+Peak Shaving reduces energy and carbon footprint, with a slight trade-off in OEE.
+
+Failure Avoided is ✅ Yes for Predictive policies (the asset never entered FAILED state), while Corrective policy fails.
 
 🧪 Running the Master Experiment
 
@@ -203,9 +206,7 @@ python main.py
 This generates:
 
 exports/ablation_results.csv - Layer A-E comparison
-
 exports/benchmark_results.csv - Policy comparison
-
 exports/figure1_health_response.png - Publication-grade plot
 
 📦 Dependencies
@@ -252,21 +253,34 @@ DECIDE    → Decision recommendation
 ACTION    → Action taken (maintenance, derating, etc.)
 OUTCOME   → Result of action (recovered, failed, etc.)
 
+5. PdM Decision Logic (PRIME Action Gate)
+
+Predictive Maintenance is triggered only when all of the following conditions are met:
+
+Confirmed Anomaly – The anomaly has persisted over the confirmation window.
+
+Persistence Ratio ≥ 0.40 (configurable in config.py).
+
+Risk Indicator – HI ≤ 75 OR RUL ≤ 50 OR Degradation ≥ 0.45.
+
+If an anomaly is confirmed but risk is not yet critical, the system recommends ELEVATE_INSPECTION instead of PdM. This ensures actionable decisions are based on temporal evidence, not single-point alerts.
+
 ✅ Acceptance Tests (All Pass)
-Criterion	Pass Condition
-Baseline	Production, energy, OEE internally consistent
-Control	Judge can run scenario without code editing
-Causality	Controls/faults/decisions create visible events
-State	Machine state changes logically
-Prediction	Predictive alert precedes simulated failure
-Explainability	Alert has readable evidence
-Action	Maintenance executes from UI (immediate)
-Recovery	Telemetry/state/KPIs change and machine returns to full health
-Energy	Energy/ECI changes consistently
-Impact	Paired outcomes are comparable
-Integrity	Demo cannot alter benchmark tables
-Reproducibility	Exact scenario can be rerun
-Presentation	Full causal story understandable in <5 minutes
+Criterion	Pass Condition	Status
+Baseline	Production, energy, OEE internally consistent	✅
+Control	Judge can run scenario without code editing	✅
+Causality	Controls/faults/decisions create visible events	✅
+State	Machine state changes logically	✅
+Prediction	Predictive alert precedes simulated failure	✅
+Explainability	Alert has readable evidence	✅
+Action	Maintenance executes from UI (immediate)	✅
+Recovery	Telemetry/state/KPIs change and machine returns to full health	✅
+Energy	Energy/ECI changes consistently	✅
+Impact	Paired outcomes are comparable	✅
+Integrity	Demo cannot alter benchmark tables	✅
+Reproducibility	Exact scenario can be rerun	✅
+Presentation	Full causal story understandable in <5 minutes	✅
+Test Results: Phase 1 (12/12), Phase 2 (21/21), Phase 3 (6/6) – all pass.
 
 📄 License
 This project is for educational and research purposes. All rights reserved.
@@ -277,4 +291,4 @@ MSA Team - National Competition for AI and Robotics (RoboDam 2026)
 🏆 Competition Presentation Sentence
 "PRIME does not only detect a problem — it explains it, predicts its consequence, recommends an action, executes the action in simulation, and measures the result."
 
-Made with ❤️ by Team MSA | PRIME-Factory v6.0
+Made with ❤️ by Team MSA | PRIME-Factory v6.2

@@ -1,6 +1,8 @@
 """
-PRIME-Factory Decision Engine v6.2
+PRIME-Factory Decision Engine v6.2 FINAL
+
 Canonical decision engine - Single source of truth for all decisions.
+FIXED: PdM Trigger now requires confirmed_anomaly + persistence + (HI/RUL/degradation).
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ class DecisionCode:
 
 @dataclass
 class Decision:
+    """Complete decision record with evidence and recommendation."""
     decision_id: str
     timestamp: int
     machine_id: str
@@ -40,6 +43,13 @@ class Decision:
 
 
 class DecisionEngine:
+    """
+    Canonical Decision Engine.
+
+    All decisions must go through this engine.
+    Dashboard wrapper must call this, not duplicate logic.
+    """
+
     def __init__(self):
         self.decision_history: List[Decision] = []
         self._decision_counter = 0
@@ -57,9 +67,14 @@ class DecisionEngine:
         production_units: int = 0,
         context: Optional[Dict[str, Any]] = None
     ) -> Decision:
+        """
+        Evaluate machine condition and generate a decision recommendation.
+        This is the CANONICAL decision logic.
+        """
         self._decision_counter += 1
         decision_id = f"DEC_{self._decision_counter:04d}"
 
+        # Build evidence summary
         evidence_summary = {
             "state": current_state,
             "health_index": round(health_index, 1),
@@ -71,6 +86,7 @@ class DecisionEngine:
             "context": context or {}
         }
 
+        # Determine recommendation, priority, and decision_code
         recommendation, priority, decision_code = self._make_decision(
             current_state=current_state,
             health_index=health_index,
@@ -107,6 +123,12 @@ class DecisionEngine:
         persistence_ratio: float = 0.0,
         context: Optional[Dict] = None
     ) -> tuple:
+        """
+        Core decision logic.
+
+        Returns: (recommendation, priority, decision_code)
+        """
+        # ===== FAILED =====
         if current_state == config.STATE_FAILED:
             return (
                 "EMERGENCY: Corrective maintenance required immediately. Machine has failed.",
@@ -114,6 +136,7 @@ class DecisionEngine:
                 DecisionCode.EMERGENCY_MAINTENANCE
             )
 
+        # ===== CRITICAL =====
         if current_state == config.STATE_CRITICAL:
             if rul_minutes is not None and rul_minutes <= 10:
                 return (
@@ -129,7 +152,10 @@ class DecisionEngine:
                 DecisionCode.CONTROLLED_STOP
             )
 
+        # ===== PREDICTIVE ALERT - PdM TRIGGER LOGIC =====
+        # ===== FIXED: Requires confirmed_anomaly + persistence + (HI/RUL/degradation) =====
         if current_state == config.STATE_PREDICTIVE_ALERT:
+            # Check if PdM should be triggered
             should_trigger = self._should_trigger_pdm(
                 health_index=health_index,
                 rul_minutes=rul_minutes,
@@ -147,14 +173,26 @@ class DecisionEngine:
                     DecisionCode.SCHEDULE_PDM
                 )
 
+            # ===== FIXED: If confirmed anomaly but not triggering, elevate inspection =====
+            if is_confirmed_anomaly:
+                rul_display = f"{rul_minutes:.0f}min" if rul_minutes is not None else "N/A"
+                return (
+                    f"PREDICTIVE ALERT: Anomaly confirmed (HI={health_index:.1f}, RUL={rul_display}). "
+                    "Risk not yet critical. Elevate inspection frequency.",
+                    "MEDIUM",
+                    DecisionCode.ELEVATE_INSPECTION
+                )
+
+            # If not confirmed but in PREDICTIVE_ALERT state (shouldn't happen, but safe)
             rul_display = f"{rul_minutes:.0f}min" if rul_minutes is not None else "N/A"
             return (
-                f"PREDICTIVE ALERT: Actionable anomaly detected. HI={health_index:.1f}, RUL={rul_display}. "
-                "Continue monitoring, prepare for intervention.",
+                f"PREDICTIVE ALERT: Anomaly detected but not confirmed. HI={health_index:.1f}, RUL={rul_display}. "
+                "Continue monitoring, await confirmation.",
                 "MEDIUM",
                 DecisionCode.MONITOR
             )
 
+        # ===== WARNING =====
         if current_state == config.STATE_WARNING:
             return (
                 "WARNING: Condition is degrading. Increase monitoring frequency. "
@@ -163,6 +201,7 @@ class DecisionEngine:
                 DecisionCode.ELEVATE_INSPECTION
             )
 
+        # ===== DEGRADING =====
         if current_state == config.STATE_DEGRADING:
             return (
                 "DEGRADING: Early signs of wear detected. Continue routine monitoring. "
@@ -171,6 +210,7 @@ class DecisionEngine:
                 DecisionCode.MONITOR
             )
 
+        # ===== MAINTENANCE / RECOVERY =====
         if current_state == config.STATE_MAINTENANCE:
             return (
                 "MAINTENANCE: Machine is under service. Await recovery.",
@@ -186,6 +226,7 @@ class DecisionEngine:
                 DecisionCode.RECOVERY_IN_PROGRESS
             )
 
+        # ===== NORMAL =====
         if abs(eci) > config.DECISION_CONFIG.get("eci_deviation_threshold", 0.15):
             return (
                 f"ENERGY NOTICE: ECI deviation detected ({eci:.3f}). "
@@ -209,25 +250,43 @@ class DecisionEngine:
         persistence_ratio: float = 0.0,
         context: Optional[Dict] = None
     ) -> bool:
-        # FIXED: Relaxed conditions - trigger if HI is low OR persistence is high
-        # Even without confirmed anomaly, if persistence is high enough, we trigger
+        """
+        PdM trigger condition.
+
+        ===== FIXED: Now requires ALL of the following =====
+        1. Confirmed anomaly
+        2. Persistence >= threshold
+        3. (HI <= threshold OR RUL <= threshold OR degradation >= threshold)
+
+        This implements the full PRIME logic: 
+        Anomaly → Persistence → Confirmation → Risk → Action
+        """
+        # ===== FIXED: Require confirmed anomaly =====
+        if not is_confirmed_anomaly:
+            return False
+
+        # ===== FIXED: Require persistence =====
         if config.PDM_REQUIRE_PERSISTENCE:
             if persistence_ratio < config.PERSISTENCE_THRESHOLD:
-                # If persistence is low, but HI is very low, still trigger
-                if health_index > config.PDM_TRIGGER_HI - 5.0:
-                    return False
-        # If HI is below threshold, trigger
+                return False
+
+        # ===== Check risk thresholds =====
+        # HI trigger
         if health_index <= config.PDM_TRIGGER_HI:
             return True
 
+        # RUL trigger
         if rul_minutes is not None and rul_minutes <= config.PDM_TRIGGER_RUL:
             return True
 
+        # Degradation trigger (context-based)
         if context and context.get("degradation", 0.0) >= config.PDM_TRIGGER_DEGRADATION:
             return True
 
+        # No trigger condition met
         return False
 
+    # ---- Helper methods ----
     def get_decision_history(self) -> List[Decision]:
         return self.decision_history
 
@@ -252,7 +311,9 @@ class DecisionEngine:
         self._decision_counter = 0
 
 
+# ===== Helper Functions =====
 def get_recommendation_from_state(state: str) -> str:
+    """Quick lookup for state-based recommendations."""
     recommendations = {
         config.STATE_NORMAL: "Continue standard operation.",
         config.STATE_DEGRADING: "Increase monitoring frequency.",
@@ -266,6 +327,7 @@ def get_recommendation_from_state(state: str) -> str:
     return recommendations.get(state, "Monitor condition.")
 
 
+# ===== Dashboard Compatibility =====
 def evaluate_decision_for_dashboard(
     machine_id: str,
     current_state: str,
@@ -277,6 +339,10 @@ def evaluate_decision_for_dashboard(
     product_key: str,
     persistence_ratio: float = 0.0
 ) -> dict:
+    """
+    Dashboard compatibility function.
+    Maps DecisionEngine output to dashboard expected format.
+    """
     engine = DecisionEngine()
     rul = float(rul_minutes) if rul_minutes > 0 else None
 
@@ -330,6 +396,7 @@ def evaluate_decision_for_dashboard(
     }
 
 
+# ===== Static method for Phase 3 test =====
 @staticmethod
 def evaluate_decision(
     machine_id: str,

@@ -1,7 +1,8 @@
 """
-PRIME-Factory Canonical Data Models & System Architecture v6.2
+PRIME-Factory Canonical Data Models & System Architecture v6.2 FINAL
 Strictly implements the unified data objects defined in the Constitution.
-Updated to support decision engine, evidence tracking, peak shaving, and force_pdm_now.
+Updated to support decision engine, evidence tracking, peak shaving, force_pdm_now,
+and counterfactual resilience.
 """
 
 from dataclasses import dataclass, field
@@ -55,9 +56,9 @@ class ResilienceMetrics:
     recovery_time_min: float = 0.0
     production_loss_units: int = 0
     downtime_avoided_min: float = 0.0
-    recovery_success: bool = True
+    recovery_success: bool = False      # FIXED: Default False
     time_to_recover_min: float = 0.0
-    failure_avoided: bool = True
+    failure_avoided: bool = False       # FIXED: Default False
     total_decisions: int = 0
     critical_decisions: int = 0
 

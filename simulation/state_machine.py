@@ -1,11 +1,12 @@
 """
-PRIME-Factory Canonical 8-State Asset State Machine Engine v6.2
+PRIME-Factory Canonical 8-State Asset State Machine Engine v6.2 FINAL
 Governs asset operational transitions, predictive alert hysteresis, maintenance duration,
 and post-repair stabilization lifecycles (Section 6).
 
 FIXED: Hysteresis now correctly tracks candidate states before transition.
 FIXED: PREDICTIVE_ALERT now uses PREDICTIVE_ALERT_HI_THRESHOLD (65.0) instead of MONITOR (50.0).
-NEW: start_maintenance() method to explicitly enter MAINTENANCE state.
+FIXED: start_maintenance() method to explicitly enter MAINTENANCE state.
+FIXED: hysteresis_count is now used from config instead of hard-coded 3.
 """
 
 import config
@@ -25,7 +26,7 @@ class AssetStateMachine:
         self._candidate_state = None
         self._candidate_count = 0
 
-        # NEW: maintenance flag
+        # maintenance flag
         self._is_in_maintenance = False
 
     def start_maintenance(self, duration: int = config.MAINTENANCE_DURATION_MINUTES):
@@ -38,7 +39,6 @@ class AssetStateMachine:
         self._is_in_maintenance = True
         self.state_history.append(self.current_state)
         self._reset_candidate()
-        # Also reset recovery timer
         self.recovery_timer = 0
 
     def _calculate_target_state(
@@ -74,26 +74,32 @@ class AssetStateMachine:
         # Normal
         return config.STATE_NORMAL
 
-    def _update_candidate(self, target_state: str) -> bool:
+    def _update_candidate(self, target_state: str, required_count: int = 3) -> bool:
         """
-        FIXED: Track candidate state persistence before applying transition.
+        Track candidate state persistence before applying transition.
+
+        ===== FIXED: Now uses required_count parameter instead of hard-coded 3 =====
 
         Returns True if candidate has persisted for required count.
         """
         if self._candidate_state is None:
+            # First time seeing this target
             self._candidate_state = target_state
             self._candidate_count = 1
             return False
 
         if self._candidate_state == target_state:
+            # Same target, increment count
             self._candidate_count += 1
-            return self._candidate_count >= 3
+            return self._candidate_count >= required_count
         else:
+            # Target changed, reset candidate
             self._candidate_state = target_state
             self._candidate_count = 1
             return False
 
     def _reset_candidate(self):
+        """Reset candidate tracking when transition is applied."""
         self._candidate_state = None
         self._candidate_count = 0
 
@@ -110,12 +116,13 @@ class AssetStateMachine:
         Updates machine operational state with hysteresis to prevent oscillation.
 
         FIXED: Properly tracks candidate state before applying transition.
+        FIXED: Uses hysteresis_count parameter instead of hard-coded 3.
 
         Follows canonical chain:
         NORMAL -> DEGRADING -> WARNING -> PREDICTIVE_ALERT -> CRITICAL -> FAILED
         And recovery: MAINTENANCE -> RECOVERY -> NORMAL
         """
-        # Store current values
+        # Store current values for history
         self.degradation_history.append(degradation)
         self.health_history.append(health_index)
 
@@ -132,7 +139,8 @@ class AssetStateMachine:
                 if self.repair_timer <= 0:
                     # Transition to recovery
                     self.current_state = config.STATE_RECOVERY
-                    self.recovery_timer = maintenance_duration
+                    # ===== FIXED: Use RECOVERY_DURATION_MINUTES from config =====
+                    self.recovery_timer = config.RECOVERY_DURATION_MINUTES
                     self._is_in_maintenance = False
                     self._reset_candidate()
                     self.state_history.append(self.current_state)
@@ -151,6 +159,8 @@ class AssetStateMachine:
             return self.current_state
 
         # ===== NORMAL STATE TRANSITIONS =====
+
+        # Calculate target state based on current values
         target_state = self._calculate_target_state(
             degradation, health_index, is_confirmed_anomaly
         )
@@ -161,11 +171,16 @@ class AssetStateMachine:
             self.state_history.append(self.current_state)
             return self.current_state
 
-        # Target is different: apply hysteresis
-        if self._update_candidate(target_state):
+        # Target is different from current state
+        # Check if candidate has persisted for required count
+        # ===== FIXED: Pass hysteresis_count parameter =====
+        if self._update_candidate(target_state, required_count=hysteresis_count):
+            # Candidate persisted, apply transition
             self.current_state = target_state
             self._reset_candidate()
+        # else: candidate still accumulating, stay in current state
 
+        # Store final state in history
         self.state_history.append(self.current_state)
         return self.current_state
 
@@ -177,7 +192,10 @@ class AssetStateMachine:
         in_maintenance: bool = False,
         maintenance_duration: int = config.MAINTENANCE_DURATION_MINUTES
     ) -> str:
-        """Legacy method - maintains backward compatibility."""
+        """
+        Legacy method - maintains backward compatibility.
+        Calls update_state_with_hysteresis with default parameters.
+        """
         return self.update_state_with_hysteresis(
             degradation=degradation,
             health_index=health_index,
@@ -188,6 +206,7 @@ class AssetStateMachine:
         )
 
     def get_state_transition_summary(self) -> dict:
+        """Get summary of state transitions for analysis."""
         if len(self.state_history) < 2:
             return {"total_transitions": 0, "states": [self.current_state]}
 
@@ -204,6 +223,7 @@ class AssetStateMachine:
         }
 
     def reset(self):
+        """Reset the state machine to initial conditions."""
         self.current_state = config.STATE_NORMAL
         self.state_history = []
         self.recovery_timer = 0
@@ -216,6 +236,7 @@ class AssetStateMachine:
 
     @staticmethod
     def get_state_badge(state: str) -> dict:
+        """Returns color badges and operational directives for dashboard."""
         badges = {
             "NORMAL": {
                 "color": "#28a745",

@@ -1,7 +1,10 @@
 """
-PRIME-Factory Master Experiment & High-Resolution Evidence Generator v6.2
+PRIME-Factory Master Experiment & High-Resolution Evidence Generator v6.2 FINAL
 Executes the Unified Engine to generate benchmarks, ablation matrices, and 300 DPI publication plots.
 Now aligned with v6.2 canonical contracts and consistent fault conditions.
+FIXED: Removed fabricated ablation fallback (raises error instead).
+FIXED: failure_avoided = corrective_failed and not predictive_failed.
+FIXED: CORRECTIVE run once, reused for comparison.
 """
 
 import os
@@ -31,7 +34,6 @@ def run_master_experiment():
     # ------------------------------------------------------------------
     print("\n[1] Running Master Scenario on M3 Sealer...")
 
-    # Use the updated benchmark config from config.py
     bench_cfg = config.BENCHMARK_CONFIG
 
     scenario = ScenarioConfig(
@@ -64,31 +66,15 @@ def run_master_experiment():
         ab_df.to_csv("exports/ablation_results.csv", index=False)
         print("   ✓ Ablation results saved to exports/ablation_results.csv")
     except Exception as e:
-        print(f"   ⚠️ Ablation study error: {e}")
-        print("   Creating fallback ablation results...")
-        fallback_ab = pd.DataFrame({
-            "Architecture Layer": [
-                "Layer A (Static Thresholds)",
-                "Layer B (Raw Isolation Forest)",
-                "Layer C (Context-Conditioned IF)",
-                "Layer D (Context IF + ECI Fusion)",
-                "Layer E (Full PRIME + Persistence)"
-            ],
-            "Precision": [0.997, 0.942, 0.950, 0.985, 0.983],
-            "Recall": [0.994, 0.872, 0.872, 0.865, 0.797],
-            "F1-Score": [0.996, 0.906, 0.909, 0.921, 0.880],
-            "False Alarms/Hr": [0.02, 2.02, 1.52, 0.52, 0.02],
-            "Early Lead Time (min)": [50, 71, 71, 63, 63]
-        })
-        fallback_ab.to_csv("exports/ablation_results.csv", index=False)
-        print(fallback_ab.to_string(index=False))
+        # ===== FIXED: Removed fabricated fallback =====
+        print(f"   ❌ Ablation study failed: {e}")
+        raise RuntimeError(f"Ablation study failed: {e}")
 
     # ------------------------------------------------------------------
-    # 3. Scientific Policy Benchmark (Aligned with Master Scenario)
+    # 3. Scientific Policy Benchmark (with optimized runs)
     # ------------------------------------------------------------------
     print("\n[3] Running Scientific Factory Policy Benchmark...")
 
-    # Use the benchmark config from config.py (now fault_start=100, max_degradation=0.75)
     benchmark_config = config.BENCHMARK_CONFIG.copy()
 
     policies = [
@@ -99,6 +85,11 @@ def run_master_experiment():
     ]
 
     bench_records = []
+
+    # ===== FIXED: Run CORRECTIVE once and store its result =====
+    corrective_result = None
+    corrective_failed = False
+
     for pol_name, is_ps in policies:
         print(f"   Running {pol_name}..." + (" + Peak Shaving" if is_ps else ""))
         sim = FactoryPolicySimulator(
@@ -106,8 +97,23 @@ def run_master_experiment():
             enable_peak_shaving=is_ps,
             seed=config.RANDOM_SEED
         )
-        # Pass the custom config to ensure identical fault conditions
         r = sim.run_policy_benchmark(custom_config=benchmark_config)
+
+        # ===== FIXED: Store corrective result for comparison =====
+        if pol_name == "CORRECTIVE":
+            corrective_result = r
+            if hasattr(r, 'resilience') and r.resilience is not None:
+                corrective_failed = not getattr(r.resilience, 'failure_avoided', True)
+
+        # ===== FIXED: Calculate failure_avoided =====
+        fail_avoided = False
+        if pol_name in ["PREVENTIVE", "PREDICTIVE"]:
+            # Compare with corrective result
+            if corrective_result is not None:
+                pred_failed = False
+                if hasattr(r, 'resilience') and r.resilience is not None:
+                    pred_failed = not getattr(r.resilience, 'failure_avoided', True)
+                fail_avoided = corrective_failed and not pred_failed
 
         bench_records.append({
             "Policy": pol_name if not is_ps else "PREDICTIVE + PEAK SHAVING",
@@ -122,7 +128,8 @@ def run_master_experiment():
             "Downtime Cost ($)": r.downtime_cost_usd,
             "PF Penalty ($)": r.pf_penalty_usd,
             "Total Cost ($)": r.total_operational_cost_usd,
-            "Carbon (kg CO2)": r.carbon_kg
+            "Carbon (kg CO2)": r.carbon_kg,
+            "Failure Avoided": "✅ Yes" if fail_avoided else "❌ No"
         })
 
     bench_df = pd.DataFrame(bench_records)
@@ -139,7 +146,6 @@ def run_master_experiment():
     if len(m3_df) > 1:
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True, dpi=300)
 
-        # Top plot: Vibration and Temperature
         ax1.plot(m3_df["timestep"], m3_df["vibration_rms"],
                  label="Vibration RMS (g)", color="#1f77b4", lw=1.5)
         ax1_t = ax1.twinx()
@@ -150,7 +156,6 @@ def run_master_experiment():
         ax1.set_ylabel("Vibration (g RMS)")
         ax1_t.set_ylabel("Temperature (°C)")
 
-        # Bottom plot: Health Index
         ax2.plot(m3_df["timestep"], m3_df["health_index"],
                  label="Health Index (HI)", color="#2ca02c", lw=2)
         ax2.axhline(70, color="orange", ls=":", label="Monitor (70)")
@@ -172,8 +177,8 @@ def run_master_experiment():
     print("  ✓ MASTER EXPERIMENT COMPLETE")
     print("=" * 80)
     print("\n  Exported files:")
-    print("    - exports/ablation_results.csv")
     print("    - exports/benchmark_results.csv")
+    print("    - exports/ablation_results.csv")
     print("    - exports/figure1_health_response.png")
     print("\n  Key Findings:")
     best_oee = bench_df.loc[bench_df['OEE (%)'].idxmax()]

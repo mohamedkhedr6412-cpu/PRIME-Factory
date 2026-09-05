@@ -1,5 +1,5 @@
 """
-PRIME-Factory Master Configuration File v6.2
+PRIME-Factory Master Configuration File v6.2 FINAL
 """
 
 # ==============================================================================
@@ -107,17 +107,18 @@ HI_WEIGHTS = {
 # 7. Maintenance & Recovery Parameters
 # ==============================================================================
 MAINTENANCE_DURATION_MINUTES = 10
-RECOVERY_DURATION_MINUTES = 15
+RECOVERY_DURATION_MINUTES = 15   # This is now used in state_machine
 RECOVERY_RATE = 0.02
 REPAIR_EFFECTIVENESS = 0.85
 
 # ==============================================================================
 # 8. PdM Trigger Configuration
 # ==============================================================================
+# ===== FIXED: Set to True to match code logic =====
 PDM_TRIGGER_HI = 75.0
 PDM_TRIGGER_RUL = 50.0
 PDM_TRIGGER_DEGRADATION = 0.45
-PDM_REQUIRE_CONFIRMED_ANOMALY = False
+PDM_REQUIRE_CONFIRMED_ANOMALY = True   # Now consistent with decision.py
 PDM_REQUIRE_PERSISTENCE = True
 PDM_MIN_LEAD_TIME_MIN = 10.0
 
@@ -133,7 +134,7 @@ DECISION_CONFIG = {
     "persistence_confirm_threshold": 0.40,
     "persistence_window": 5,
     "eci_deviation_threshold": 0.15,
-    "hysteresis_count": 3,
+    "hysteresis_count": 3,   # Used in state_machine
 }
 
 # ==============================================================================
@@ -156,13 +157,13 @@ PEAK_SHAVING_END = 360
 PEAK_SHAVING_DERATE = 0.90
 
 # ==============================================================================
-# 12. Benchmark Configuration (FINAL - guaranteed failure for CORRECTIVE)
+# 12. Benchmark Configuration
 # ==============================================================================
 BENCHMARK_CONFIG = {
     "fault_machine": "M3",
     "fault_type": "Bearing Wear",
     "fault_start": 100,
-    "max_degradation": 0.95,   # قيمة كافية لإحداث فشل في CORRECTIVE
+    "max_degradation": 0.95,
     "seed": 42,
     "product_schedule": ["Product_B"] * TOTAL_TIMESTEPS,
 }
