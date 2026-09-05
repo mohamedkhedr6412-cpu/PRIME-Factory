@@ -521,52 +521,51 @@ exports/
 ---
 
 # 19. Project Structure
-
 PRIME-Factory/
-├── ai/                                # AI & Anomaly Detection
-│   ├── anomaly.py                     # Persistence & temporal filtering
-│   ├── baseline.py                    # Layer A: Static thresholds
+├── ai/                                # AI & Anomaly Detection Pipeline
+│   ├── anomaly.py                     # Temporal filtering and anomaly persistence
+│   ├── baseline.py                    # Static baseline thresholds (Layer A)
 │   ├── decision.py                    # Canonical Decision Engine (v6.2)
-│   ├── health_index.py                # HI, RUL, and RUL Validation
-│   └── isolation_forest.py            # Layer B: Isolation Forest
+│   ├── health_index.py                # Machine HI calculation and RUL estimators
+│   └── isolation_forest.py            # Unsupervised Isolation Forest (Layer B)
 │
-├── control/                           # Control & decision wrapper
-│   └── decision_engine.py             # Dashboard compatibility wrapper
+├── control/                           # Control Interfaces & Wrappers
+│   └── decision_engine.py             # Dashboard integration layer
 │
-├── core/                              # Core models & evidence
-│   ├── evidence.py                    # Evidence tracker (SENSE → ... → OUTCOME)
-│   └── models.py                      # Data models (ScenarioConfig, etc.)
+├── core/                              # Core Domain Models
+│   ├── evidence.py                    # Evidence tracker (SENSE -> ... -> OUTCOME)
+│   └── models.py                      # Scenario and system data structures
 │
-├── dashboard/                         # Streamlit UI
-│   └── app.py                         # Main interactive dashboard
+├── dashboard/                         # Interactive User Interface
+│   └── app.py                         # Streamlit multi-tab factory dashboard
 │
-├── energy/                            # Energy management (Single Source of Truth)
-│   ├── eci.py                         # Energy Condition Indicator
-│   ├── energy_model.py                # Unified Financial & ESG calculations
-│   └── peak_shaving.py                # Demand response & Peak Shaving Controller
+├── energy/                            # Energy & ESG Accounting
+│   ├── eci.py                         # Energy Condition Indicator (ECI)
+│   ├── energy_model.py                # Unified cost, tariff, and carbon models
+│   └── peak_shaving.py                # Automated peak shaving controller
 │
-├── evaluation/                        # Evaluation & benchmarking
-│   ├── ablation.py                    # Layer A-E ablation study (v6.2)
-│   └── kpis.py                        # Canonical OEE calculation
+├── evaluation/                        # Benchmarking & Ablation Frameworks
+│   ├── ablation.py                    # Multi-layer AI ablation evaluation
+│   └── kpis.py                        # Standardized OEE and throughput metrics
 │
-├── maintenance/                       # Maintenance policies
-│   └── policies.py                    # What-if analysis & policy comparison
+├── maintenance/                       # Maintenance Strategy Implementations
+│   └── policies.py                    # Policy what-if comparison models
 │
-├── simulation/                        # Factory simulation (Unified Engine)
-│   ├── engine.py                      # Unified Simulation Engine (Core)
-│   ├── events.py                      # Event logging
-│   ├── factory.py                     # Packaging line orchestrator (Bottleneck)
-│   ├── faults.py                      # Fault injection profiles
-│   ├── machines.py                    # Individual machine model (Gradual Recovery)
-│   └── state_machine.py               # 8-state asset state machine (Hysteresis fixed)
+├── simulation/                        # Factory Simulation Core
+│   ├── engine.py                      # Main discrete-time simulation driver
+│   ├── events.py                      # Audit and simulation event logging
+│   ├── factory.py                     # Multi-station packaging line orchestrator
+│   ├── faults.py                      # Degradation and fault injection profiles
+│   ├── machines.py                    # Individual equipment dynamics & recovery
+│   └── state_machine.py               # 8-state asset operational state machine
 │
-├── config.py                          # Central configuration (v6.2)
-├── main.py                            # Master experiment runner
+├── config.py                          # Global configuration parameters (v6.2)
+├── main.py                            # Experiment runner and report generator
 ├── README.md                          # Project documentation
-├── requirements.txt                   # Python dependencies
-├── test_phase1.py                     # Phase 1 tests
-├── test_phase2.py                     # Phase 2 tests
-└── test_phase3.py                     # Phase 3 tests
+├── requirements.txt                   # Dependency specifications
+├── test_phase1.py                     # Phase 1 unit tests
+├── test_phase2.py                     # Phase 2 subsystem tests
+└── test_phase3.py                     # Phase 3 end-to-end integration tests
 
 
 ---
