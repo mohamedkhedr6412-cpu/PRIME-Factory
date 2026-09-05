@@ -73,9 +73,11 @@ if "benchmark_result" not in st.session_state:
     st.session_state.benchmark_result = None
 if "ablation_result" not in st.session_state:
     st.session_state.ablation_result = None
-# ===== NEW: Track if what-if has been cached =====
 if "whatif_cached" not in st.session_state:
     st.session_state.whatif_cached = False
+# ===== NEW: Track if PdM has been triggered in Step 3 =====
+if "pdm_triggered_in_step3" not in st.session_state:
+    st.session_state.pdm_triggered_in_step3 = False
 
 
 st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v6.2")
@@ -102,6 +104,8 @@ with col_j1:
         st.session_state.benchmark_result = None
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
+        # ===== NEW: Reset PdM trigger flag =====
+        st.session_state.pdm_triggered_in_step3 = False
         st.rerun()
 with col_j2:
     if st.button("⏮️ Reset Pitch", use_container_width=True):
@@ -115,6 +119,8 @@ with col_j2:
         st.session_state.benchmark_result = None
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
+        # ===== NEW: Reset PdM trigger flag =====
+        st.session_state.pdm_triggered_in_step3 = False
         st.rerun()
 
 # ---- Judge Step Display ----
@@ -129,6 +135,8 @@ if j_step == 1:
     max_deg = 0.0
     enable_chaos = False
     apply_dr = False
+    # ===== NEW: Reset PdM trigger flag when entering Step 1 =====
+    st.session_state.pdm_triggered_in_step3 = False
 elif j_step == 2:
     st.sidebar.warning("📌 **Step 2 (0:20-1:35):** M3 Bearing Wear Onset & XAI Decision Trace.")
     sim_mode = "Fixed Product Regime"
@@ -138,6 +146,8 @@ elif j_step == 2:
     max_deg = 0.85
     enable_chaos = False
     apply_dr = False
+    # ===== NEW: Reset PdM trigger flag when entering Step 2 =====
+    st.session_state.pdm_triggered_in_step3 = False
 elif j_step == 3:
     st.sidebar.success("📌 **Step 3 (1:35-3:00):** Causal PdM Intervention, Recovery & What-If ROI.")
     sim_mode = "Fixed Product Regime"
@@ -147,6 +157,12 @@ elif j_step == 3:
     max_deg = 0.85
     enable_chaos = False
     apply_dr = False
+    # ===== FIXED: Auto-trigger PdM in Step 3 =====
+    if not st.session_state.get("pdm_triggered_in_step3", False):
+        st.session_state.force_pdm_now = True
+        st.session_state.pdm_triggered_in_step3 = True
+        # Force a rerun to execute the simulation with force_pdm_now=True
+        st.rerun()
 else:
     # Manual mode
     st.sidebar.subheader("⚙️ Manual Configuration")
@@ -175,6 +191,8 @@ else:
     max_deg = st.sidebar.slider("Severity (%):", 10, 85, 75) / 100.0
     enable_chaos = st.sidebar.checkbox("Chaos Stress-Test (Sensor Noise)", value=False)
     apply_dr = st.sidebar.checkbox("Enable Peak Shaving", value=False)
+    # ===== NEW: Reset PdM trigger flag when entering manual mode =====
+    st.session_state.pdm_triggered_in_step3 = False
 
 # ---- Machine Selection ----
 selected_machine = st.sidebar.selectbox(
@@ -197,6 +215,7 @@ with col_btn1:
         st.session_state.benchmark_result = None
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
+        st.session_state.pdm_triggered_in_step3 = True  # Mark as triggered manually
         st.rerun()
 with col_btn2:
     if st.button("🔄 Reset Line", use_container_width=True):
@@ -210,6 +229,7 @@ with col_btn2:
         st.session_state.benchmark_result = None
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
+        st.session_state.pdm_triggered_in_step3 = False
         st.rerun()
 
 # ---- Playback ----
@@ -235,7 +255,6 @@ else:
 # ---- Improved Hashing: include full schedule, fault_type, enable_chaos ----
 def compute_scenario_hash(scenario):
     """Compute a deterministic hash for the scenario, excluding force_pdm_now."""
-    # Use all relevant parameters except force_pdm_now
     hash_input = (
         scenario.fault_machine,
         scenario.fault_type,
@@ -244,7 +263,7 @@ def compute_scenario_hash(scenario):
         scenario.policy_type,
         scenario.enable_peak_shaving,
         scenario.enable_chaos,
-        tuple(scenario.product_schedule),  # full schedule
+        tuple(scenario.product_schedule),
     )
     return hashlib.md5(str(hash_input).encode()).hexdigest()
 
@@ -597,10 +616,8 @@ if st.session_state.sim_result is not None:
     with t_whatif:
         st.subheader("⚖️ Dual-Branch What-If Analysis (Intervention vs No Intervention)")
 
-        # Button to trigger What-If
         if st.button("▶️ Run What-If Analysis", key="run_whatif"):
             with st.spinner("Running What-If analysis..."):
-                # ===== NEW: Use cached version =====
                 st.session_state.whatif_result = run_what_if_cached(
                     fault_start_val=fault_start,
                     max_deg_val=max_deg,
@@ -609,7 +626,6 @@ if st.session_state.sim_result is not None:
                 st.session_state.whatif_cached = True
                 st.rerun()
 
-        # Display results if available
         if st.session_state.whatif_result is not None:
             whatif_res = st.session_state.whatif_result
 
