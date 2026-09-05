@@ -73,6 +73,9 @@ if "benchmark_result" not in st.session_state:
     st.session_state.benchmark_result = None
 if "ablation_result" not in st.session_state:
     st.session_state.ablation_result = None
+# ===== NEW: Track if what-if has been cached =====
+if "whatif_cached" not in st.session_state:
+    st.session_state.whatif_cached = False
 
 
 st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v6.2")
@@ -98,6 +101,7 @@ with col_j1:
         st.session_state.force_pdm_now = False
         st.session_state.benchmark_result = None
         st.session_state.ablation_result = None
+        st.session_state.whatif_cached = False
         st.rerun()
 with col_j2:
     if st.button("⏮️ Reset Pitch", use_container_width=True):
@@ -110,6 +114,7 @@ with col_j2:
         st.session_state.force_pdm_now = False
         st.session_state.benchmark_result = None
         st.session_state.ablation_result = None
+        st.session_state.whatif_cached = False
         st.rerun()
 
 # ---- Judge Step Display ----
@@ -191,6 +196,7 @@ with col_btn1:
         st.session_state.whatif_hash = None
         st.session_state.benchmark_result = None
         st.session_state.ablation_result = None
+        st.session_state.whatif_cached = False
         st.rerun()
 with col_btn2:
     if st.button("🔄 Reset Line", use_container_width=True):
@@ -203,6 +209,7 @@ with col_btn2:
         st.session_state.force_pdm_now = False
         st.session_state.benchmark_result = None
         st.session_state.ablation_result = None
+        st.session_state.whatif_cached = False
         st.rerun()
 
 # ---- Playback ----
@@ -268,6 +275,7 @@ if st.session_state.scenario_hash != current_hash:
     st.session_state.benchmark_result = None
     st.session_state.ablation_result = None
     st.session_state.sim_running = True
+    st.session_state.whatif_cached = False
 
 # ===== Cached simulation function =====
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -292,20 +300,24 @@ def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
         force_pdm_now=force_pdm
     )
     result = UnifiedSimulationEngine.run(scenario)
-    # We need to return a tuple of serializable objects
-    # result contains DataFrames, so we can return them as is (st.cache_data handles DataFrames)
     return result
+
+# ===== Cached What-If function =====
+@st.cache_data(ttl=3600, show_spinner=False)
+def run_what_if_cached(fault_start_val, max_deg_val, seed_val):
+    """Cached What-If analysis for the same inputs."""
+    return FactoryPolicySimulator.run_what_if_analysis(
+        product_schedule=["Product_B"] * config.TOTAL_TIMESTEPS,
+        fault_start_t=fault_start_val,
+        max_deg=max_deg_val,
+        seed=seed_val
+    )
+
 
 # ===== DISPLAY SIMULATION STATUS =====
 if st.session_state.sim_running:
-    progress_bar = st.progress(0, text="🔄 Running simulation... Please wait...")
-    for i in range(100):
-        time.sleep(0.005)
-        progress_bar.progress(i + 1, text=f"🔄 Simulation in progress... {i+1}%")
-    progress_bar.empty()
-    st.session_state.sim_running = False
-    
-    with st.spinner("Finalizing simulation..."):
+    # ===== FIXED: Replace fake progress bar with real spinner =====
+    with st.spinner("🔄 Running PRIME-Factory simulation... This may take 30-60 seconds."):
         # Prepare scenario dict for caching
         scenario_dict = {
             "scenario_id": scenario_base.scenario_id,
@@ -322,8 +334,9 @@ if st.session_state.sim_running:
         }
         force_pdm = st.session_state.get('force_pdm_now', False)
         st.session_state.sim_result = run_cached_simulation(current_hash, scenario_dict, force_pdm)
-        # Reset force_pdm_now after simulation
+        # ===== FIXED: Reset force_pdm_now without extra rerun =====
         st.session_state.force_pdm_now = False
+        st.session_state.sim_running = False
         st.rerun()
 
 # ===== IF SIMULATION DONE, SHOW RESULTS =====
@@ -580,19 +593,20 @@ if st.session_state.sim_result is not None:
         else:
             st.warning("Evidence tracker not available.")
 
-    # ===== TAB 4: What-If (Lazy) =====
+    # ===== TAB 4: What-If (Lazy + Cached) =====
     with t_whatif:
         st.subheader("⚖️ Dual-Branch What-If Analysis (Intervention vs No Intervention)")
 
         # Button to trigger What-If
         if st.button("▶️ Run What-If Analysis", key="run_whatif"):
             with st.spinner("Running What-If analysis..."):
-                st.session_state.whatif_result = FactoryPolicySimulator.run_what_if_analysis(
-                    product_schedule=["Product_B"] * config.TOTAL_TIMESTEPS,
-                    fault_start_t=fault_start,
-                    max_deg=max_deg,
-                    seed=config.RANDOM_SEED
+                # ===== NEW: Use cached version =====
+                st.session_state.whatif_result = run_what_if_cached(
+                    fault_start_val=fault_start,
+                    max_deg_val=max_deg,
+                    seed_val=config.RANDOM_SEED
                 )
+                st.session_state.whatif_cached = True
                 st.rerun()
 
         # Display results if available
