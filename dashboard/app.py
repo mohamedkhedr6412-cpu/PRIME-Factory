@@ -2,7 +2,6 @@
 PRIME-Factory Interactive Industrial Control & Decision Center v6.2 (Ultra-Fast)
 Features: Multi-Product Contexts, Physical Telemetry, XAI Decision Trace, Deterministic What-If,
 Causal PdM Execution Lifecycle, Industrial Resilience, and 3-Minute Judge Mode Wizard.
-Now with explicit force_pdm_now for interactive control and lazy-loaded heavy computations.
 """
 
 import sys
@@ -18,7 +17,6 @@ from plotly.subplots import make_subplots
 import json
 import hashlib
 import time
-import functools
 
 import config
 from core.models import ScenarioConfig
@@ -31,7 +29,6 @@ from core.evidence import EvidenceTracker
 
 
 def _get(obj, key, default=0.0):
-    """Safely extracts value from either a dataclass object or a dictionary."""
     if hasattr(obj, key):
         return getattr(obj, key)
     elif isinstance(obj, dict):
@@ -40,7 +37,6 @@ def _get(obj, key, default=0.0):
 
 
 def safe_column(df, col, default=0):
-    """Safely get a column from DataFrame, return default Series if missing."""
     if col in df.columns:
         return df[col]
     return pd.Series(default, index=df.index)
@@ -125,7 +121,6 @@ j_step = st.session_state.judge_mode_step
 
 if j_step == 1:
     st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
-    # ===== FORCE RESET: Ensure no PdM flags are active =====
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
     sim_mode = "Multi-Product Switching (A → B → C)"
@@ -137,7 +132,6 @@ if j_step == 1:
     apply_dr = False
 elif j_step == 2:
     st.sidebar.warning("📌 **Step 2 (0:20-1:35):** M3 Bearing Wear Onset & XAI Decision Trace.")
-    # ===== FORCE RESET: Ensure no PdM flags are active =====
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
     sim_mode = "Fixed Product Regime"
@@ -156,13 +150,11 @@ elif j_step == 3:
     max_deg = 0.85
     enable_chaos = False
     apply_dr = False
-    # ===== Auto-trigger PdM only once =====
     if not st.session_state.get("pdm_triggered_in_step3", False):
         st.session_state.force_pdm_now = True
         st.session_state.pdm_triggered_in_step3 = True
         st.rerun()
 else:
-    # Manual mode
     st.sidebar.subheader("⚙️ Manual Configuration")
     sim_mode = st.sidebar.radio(
         "Operating Schedule:",
@@ -189,7 +181,6 @@ else:
     max_deg = st.sidebar.slider("Severity (%):", 10, 85, 75) / 100.0
     enable_chaos = st.sidebar.checkbox("Chaos Stress-Test (Sensor Noise)", value=False)
     apply_dr = st.sidebar.checkbox("Enable Peak Shaving", value=False)
-    # ===== Reset flags when entering manual mode =====
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
 
@@ -252,7 +243,7 @@ else:
     schedule = generate_switching_schedule(config.TOTAL_TIMESTEPS)
 
 def compute_scenario_hash(scenario):
-    """Compute a deterministic hash for the scenario, excluding force_pdm_now."""
+    """Compute a deterministic hash for the scenario, INCLUDING force_pdm_now."""
     hash_input = (
         scenario.fault_machine,
         scenario.fault_type,
@@ -262,10 +253,12 @@ def compute_scenario_hash(scenario):
         scenario.enable_peak_shaving,
         scenario.enable_chaos,
         tuple(scenario.product_schedule),
+        scenario.force_pdm_now,  # <-- NOW INCLUDED!
     )
     return hashlib.md5(str(hash_input).encode()).hexdigest()
 
-# Build scenario (without force_pdm_now for hashing)
+# Build scenario
+force_pdm = st.session_state.get('force_pdm_now', False)
 scenario_base = ScenarioConfig(
     scenario_id="LIVE_DASHBOARD_RUN",
     seed=config.RANDOM_SEED,
@@ -278,7 +271,7 @@ scenario_base = ScenarioConfig(
     enable_peak_shaving=apply_dr,
     manual_pdm_timestep=None,
     policy_type="PREDICTIVE",
-    force_pdm_now=False
+    force_pdm_now=force_pdm
 )
 
 current_hash = compute_scenario_hash(scenario_base)
@@ -294,7 +287,7 @@ if st.session_state.scenario_hash != current_hash:
     st.session_state.sim_running = True
     st.session_state.whatif_cached = False
 
-# ===== Cached simulation function =====
+# ===== Cached simulation function (with force_pdm in hash, so it's safe) =====
 @st.cache_data(ttl=3600, show_spinner=False)
 def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
     scenario = ScenarioConfig(
