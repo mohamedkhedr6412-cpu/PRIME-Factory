@@ -16,7 +16,7 @@ FIXED: OEE uses actual production units by product.
 FIXED: Evidence ACTION/OUTCOME linked to SAME trace via trace_id_by_machine.
 FIXED: downtime_avoided_min = 0.0 (computed in counterfactual).
 FIXED: production_loss_units = 0 (computed in counterfactual).
-FIXED: RUL string shows "~XX min" when health is low but no RUL can be estimated.
+FIXED: RUL string shows "~30 min" when health is below PREDICTIVE_ALERT threshold.
 """
 
 from typing import List, Dict, Any, Optional
@@ -358,8 +358,8 @@ class UnifiedSimulationEngine:
                 )
                 rul_confidence = get_hi_confidence(health_index, len(hi_histories[mid]))
 
-                # ===== FIXED: Provide reasonable RUL string when health is low =====
-                if rul_value is None and health_index < 70:
+                # ===== FIXED: Use PREDICTIVE_ALERT threshold for RUL display =====
+                if rul_value is None and health_index < config.PREDICTIVE_ALERT_HI_THRESHOLD:
                     rul_str = "~30 min"
                     rul_confidence = 0.6
                 elif rul_value is None:
