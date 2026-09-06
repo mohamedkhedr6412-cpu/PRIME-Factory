@@ -308,7 +308,9 @@ if st.session_state.scenario_hash != current_hash:
 # ===== FIXED: Manual caching using session_state (no @st.cache_data) =====
 def run_simulation_with_cache(scenario_dict, force_pdm):
     """Run simulation and cache result in session_state using a unique key."""
-    cache_key = f"{scenario_dict['scenario_id']}_{hashlib.md5(str(scenario_dict).encode()).hexdigest()}_{force_pdm}"
+    # ===== FIXED: Use json.dumps for stable string representation =====
+    scenario_json = json.dumps(scenario_dict, sort_keys=True)
+    cache_key = f"{scenario_dict['scenario_id']}_{hashlib.md5(scenario_json.encode()).hexdigest()}_{force_pdm}"
     
     if cache_key in st.session_state.sim_cache:
         # Return cached result
