@@ -137,6 +137,10 @@ with col_j2:
 # ---- Update scenario parameters based on judge_mode_step ----
 def update_scenario_params(step):
     """Set scenario parameters based on the current step."""
+    # Reset simulation result to force fresh run
+    st.session_state.sim_result = None
+    st.session_state.scenario_hash = None
+    
     if step == 1:
         st.session_state.sim_mode = "Multi-Product Switching (A → B → C)"
         st.session_state.selected_product = "Product_B"
@@ -153,7 +157,7 @@ def update_scenario_params(step):
         st.session_state.selected_product = "Product_B"
         st.session_state.fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
         st.session_state.fault_start = 120
-        st.session_state.max_deg = 0.55
+        st.session_state.max_deg = 0.35  # FIXED: Reduced from 0.55 to 0.35 for PREDICTIVE_ALERT
         st.session_state.enable_chaos = False
         st.session_state.apply_dr = False
         st.session_state.force_pdm_now = False
