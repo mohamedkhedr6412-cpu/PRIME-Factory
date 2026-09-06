@@ -128,7 +128,6 @@ if j_step == 1:
     st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
-    # Use unique scenario_id to avoid cache collisions
     scenario_id = "STEP1_HEALTHY"
     sim_mode = "Multi-Product Switching (A → B → C)"
     selected_product = "Product_B"
@@ -169,7 +168,7 @@ elif j_step == 3:
 else:
     # Manual mode
     st.sidebar.subheader("⚙️ Manual Configuration")
-    scenario_id = "LIVE_DASHBOARD_RUN"  # Keep original ID for manual mode
+    scenario_id = "LIVE_DASHBOARD_RUN"
     sim_mode = st.sidebar.radio(
         "Operating Schedule:",
         ["Fixed Product Regime", "Multi-Product Switching (A → B → C)"],
@@ -256,9 +255,11 @@ else:
     from simulation.faults import generate_switching_schedule
     schedule = generate_switching_schedule(config.TOTAL_TIMESTEPS)
 
+# ===== FIXED: Include scenario_id in the hash =====
 def compute_scenario_hash(scenario):
-    """Compute a deterministic hash for the scenario, excluding force_pdm_now."""
+    """Compute a deterministic hash for the scenario, including scenario_id."""
     hash_input = (
+        scenario.scenario_id,  # <--- ADDED: scenario_id is now part of hash
         scenario.fault_machine,
         scenario.fault_type,
         scenario.fault_start,
@@ -272,7 +273,7 @@ def compute_scenario_hash(scenario):
 
 # Build scenario (without force_pdm_now for hashing)
 scenario_base = ScenarioConfig(
-    scenario_id=scenario_id,  # <--- Use the unique scenario_id
+    scenario_id=scenario_id,
     seed=config.RANDOM_SEED,
     product_schedule=schedule,
     fault_machine=selected_machine,
