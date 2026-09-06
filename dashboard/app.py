@@ -128,7 +128,7 @@ if j_step == 1:
     st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
-    st.session_state.scenario_hash = None
+    st.session_state.scenario_hash = None  # <--- مفتاح الحل
     sim_mode = "Multi-Product Switching (A → B → C)"
     selected_product = "Product_B"
     fault_type = "None (Healthy Baseline)"
