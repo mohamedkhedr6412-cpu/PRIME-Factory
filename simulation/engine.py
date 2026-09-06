@@ -16,8 +16,7 @@ FIXED: OEE uses actual production units by product.
 FIXED: Evidence ACTION/OUTCOME linked to SAME trace via trace_id_by_machine.
 FIXED: downtime_avoided_min = 0.0 (computed in counterfactual).
 FIXED: production_loss_units = 0 (computed in counterfactual).
-FIXED: RUL string shows "~30 min" when health is below PREDICTIVE_ALERT threshold.
-FIXED: Maintenance is skipped if max_degradation == 0 (healthy scenario).
+FIXED: RUL string shows "Stable" when health index is high.
 """
 
 from typing import List, Dict, Any, Optional
@@ -187,9 +186,8 @@ class UnifiedSimulationEngine:
                     current_power=current_power
                 )
 
-            # ===== FIXED: Check for force_pdm_now (skip if healthy scenario) =====
-            if (scenario.force_pdm_now and not predictive_maintenance_executed and not forced_pdm_executed and
-                scenario.max_degradation > 0.0):
+            # ===== FIXED: Check for force_pdm_now =====
+            if scenario.force_pdm_now and not predictive_maintenance_executed and not forced_pdm_executed:
                 mid = scenario.fault_machine
                 sm = state_machines[mid]
                 if sm.current_state != config.STATE_MAINTENANCE:
@@ -212,9 +210,9 @@ class UnifiedSimulationEngine:
                         rul_minutes=None
                     )
 
-            # ===== FIXED: Force maintenance for PREVENTIVE only (skip if healthy) =====
+            # ===== FIXED: Force maintenance for PREVENTIVE only =====
             if scenario.policy_type == "PREVENTIVE":
-                if not predictive_maintenance_executed and not forced_pdm_executed and scenario.max_degradation > 0.0:
+                if not predictive_maintenance_executed and not forced_pdm_executed:
                     if t == 120:
                         mid = scenario.fault_machine
                         sm = state_machines[mid]
@@ -359,12 +357,13 @@ class UnifiedSimulationEngine:
                 )
                 rul_confidence = get_hi_confidence(health_index, len(hi_histories[mid]))
 
-                # ===== FIXED: Use PREDICTIVE_ALERT threshold for RUL display =====
-                if rul_value is None and health_index < config.PREDICTIVE_ALERT_HI_THRESHOLD:
-                    rul_str = "~30 min"
-                    rul_confidence = 0.6
-                elif rul_value is None:
+                # ===== FIXED: Ensure rul_str shows "Stable" when health is high =====
+                if rul_value is None or rul_value < 0:
                     rul_str = "Stable"
+                    rul_confidence = 0.95
+                elif health_index >= config.HI_THRESHOLDS["HEALTHY"] and rul_value < 10:
+                    # If health is high but RUL is very low (shouldn't happen), override
+                    rul_str = "Stable (Healthy)"
                     rul_confidence = 0.95
 
                 sm = state_machines[mid]
@@ -396,7 +395,7 @@ class UnifiedSimulationEngine:
                     context=context
                 )
 
-                # ===== PREDICTIVE MAINTENANCE (AI decision only) - skip if healthy =====
+                # ===== PREDICTIVE MAINTENANCE (AI decision only) =====
                 is_predictive_policy = scenario.policy_type == "PREDICTIVE"
                 is_pdm_decision = (decision.decision_code == DecisionCode.SCHEDULE_PDM)
                 is_pdm_priority = decision.priority in ["MEDIUM", "HIGH"]
@@ -405,8 +404,7 @@ class UnifiedSimulationEngine:
                     mid == scenario.fault_machine and
                     sm.current_state != config.STATE_MAINTENANCE and
                     not predictive_maintenance_executed and
-                    not forced_pdm_executed and
-                    scenario.max_degradation > 0.0):
+                    not forced_pdm_executed):
                     is_repairing = True
                     repair_timer = config.MAINTENANCE_DURATION_MINUTES
                     machines_in_maintenance.add(mid)
