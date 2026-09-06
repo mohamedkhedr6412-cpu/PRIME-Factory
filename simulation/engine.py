@@ -16,8 +16,7 @@ FIXED: OEE uses actual production units by product.
 FIXED: Evidence ACTION/OUTCOME linked to SAME trace via trace_id_by_machine.
 FIXED: downtime_avoided_min = 0.0 (computed in counterfactual).
 FIXED: production_loss_units = 0 (computed in counterfactual).
-FIXED: RUL string shows "Stable" when health is high, with fallback estimation for critical states.
-FIXED: Downtime is NOT counted for healthy baseline scenarios (max_degradation=0.0).
+FIXED: RUL string shows "Stable" when health index is high.
 """
 
 from typing import List, Dict, Any, Optional
@@ -174,9 +173,6 @@ class UnifiedSimulationEngine:
 
         machine_ever_failed = {mid: False for mid in factory.machines}
 
-        # ===== FIXED: Identify healthy baseline scenario =====
-        is_healthy_scenario = (scenario.max_degradation == 0.0 and scenario.fault_type == "None (Healthy Baseline)")
-
         # ===== 6. Main simulation loop =====
         for t in range(timesteps):
             prod_key = scenario.product_schedule[t]
@@ -242,9 +238,7 @@ class UnifiedSimulationEngine:
             # ----- 6b. Handle maintenance state -----
             if is_repairing:
                 repair_timer -= 1
-                # ===== FIXED: Do NOT count downtime for healthy baseline =====
-                if not is_healthy_scenario:
-                    downtime_minutes += 1.0
+                downtime_minutes += 1.0
 
                 for mid, machine in factory.machines.items():
                     sm = state_machines[mid]
@@ -363,26 +357,14 @@ class UnifiedSimulationEngine:
                 )
                 rul_confidence = get_hi_confidence(health_index, len(hi_histories[mid]))
 
-                # ===== FIXED: Better RUL string handling =====
+                # ===== FIXED: Ensure rul_str shows "Stable" when health is high =====
                 if rul_value is None or rul_value < 0:
-                    if health_index < config.HI_THRESHOLDS["MONITOR"]:  # Less than 50
-                        # Estimate based on how far below 50 we are
-                        estimated_rul = max(1, int((health_index - config.HI_THRESHOLDS["CRITICAL"]) / 0.5))
-                        rul_str = f"{estimated_rul} min (estimated)"
-                        rul_confidence = 0.6
-                    elif health_index < config.HI_THRESHOLDS["HEALTHY"]:  # 50-70
-                        estimated_rul = max(5, int((health_index - config.HI_THRESHOLDS["MONITOR"]) / 0.3) + 10)
-                        rul_str = f"{estimated_rul} min (estimated)"
-                        rul_confidence = 0.7
-                    else:
-                        rul_str = "Stable"
-                        rul_confidence = 0.95
+                    rul_str = "Stable"
+                    rul_confidence = 0.95
                 elif health_index >= config.HI_THRESHOLDS["HEALTHY"] and rul_value < 10:
+                    # If health is high but RUL is very low (shouldn't happen), override
                     rul_str = "Stable (Healthy)"
                     rul_confidence = 0.95
-                else:
-                    # Use the returned string from estimate_rolling_rul
-                    pass
 
                 sm = state_machines[mid]
                 is_confirmed = bool(processor_result.get("is_confirmed_anomaly", False))
