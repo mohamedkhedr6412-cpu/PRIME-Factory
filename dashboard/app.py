@@ -2,7 +2,7 @@
 PRIME-Factory Interactive Industrial Control & Decision Center v6.2 (Ultra-Fast)
 Features: Multi-Product Contexts, Physical Telemetry, XAI Decision Trace, Deterministic What-If,
 Causal PdM Execution Lifecycle, Industrial Resilience, and 3-Minute Judge Mode Wizard.
-Now with explicit force_pdm_now for interactive control and lazy-loaded heavy computations.
+Now with explicit force_pdm_now for interactive control and manual session-state caching.
 """
 
 import sys
@@ -77,6 +77,9 @@ if "whatif_cached" not in st.session_state:
     st.session_state.whatif_cached = False
 if "pdm_triggered_in_step3" not in st.session_state:
     st.session_state.pdm_triggered_in_step3 = False
+# ===== NEW: Manual cache for simulation results =====
+if "sim_cache" not in st.session_state:
+    st.session_state.sim_cache = {}
 
 
 st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v6.2")
@@ -123,10 +126,12 @@ with col_j2:
 # ---- Judge Step Display ----
 j_step = st.session_state.judge_mode_step
 
+# ===== FIXED: Assign unique scenario_id for each step =====
 if j_step == 1:
     st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
+    scenario_id = "STEP1_HEALTHY"
     sim_mode = "Multi-Product Switching (A → B → C)"
     selected_product = "Product_B"
     fault_type = "None (Healthy Baseline)"
@@ -134,19 +139,23 @@ if j_step == 1:
     max_deg = 0.0
     enable_chaos = False
     apply_dr = False
+
 elif j_step == 2:
     st.sidebar.warning("📌 **Step 2 (0:20-1:35):** M3 Bearing Wear Onset & XAI Decision Trace.")
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
+    scenario_id = "STEP2_FAULT"
     sim_mode = "Fixed Product Regime"
     selected_product = "Product_B"
     fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
     fault_start = 120
-    max_deg = 0.55  # <--- FIXED: Changed from 0.85 to 0.55
+    max_deg = 0.55
     enable_chaos = False
     apply_dr = False
+
 elif j_step == 3:
     st.sidebar.success("📌 **Step 3 (1:35-3:00):** Causal PdM Intervention, Recovery & What-If ROI.")
+    scenario_id = "STEP3_PDM"
     sim_mode = "Fixed Product Regime"
     selected_product = "Product_B"
     fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
@@ -158,9 +167,11 @@ elif j_step == 3:
         st.session_state.force_pdm_now = True
         st.session_state.pdm_triggered_in_step3 = True
         st.rerun()
+
 else:
     # Manual mode
     st.sidebar.subheader("⚙️ Manual Configuration")
+    scenario_id = "LIVE_DASHBOARD_RUN"
     sim_mode = st.sidebar.radio(
         "Operating Schedule:",
         ["Fixed Product Regime", "Multi-Product Switching (A → B → C)"],
@@ -247,9 +258,11 @@ else:
     from simulation.faults import generate_switching_schedule
     schedule = generate_switching_schedule(config.TOTAL_TIMESTEPS)
 
+# ===== FIXED: Include scenario_id in the hash =====
 def compute_scenario_hash(scenario):
-    """Compute a deterministic hash for the scenario, excluding force_pdm_now."""
+    """Compute a deterministic hash for the scenario, including scenario_id."""
     hash_input = (
+        scenario.scenario_id,
         scenario.fault_machine,
         scenario.fault_type,
         scenario.fault_start,
@@ -263,7 +276,7 @@ def compute_scenario_hash(scenario):
 
 # Build scenario (without force_pdm_now for hashing)
 scenario_base = ScenarioConfig(
-    scenario_id="LIVE_DASHBOARD_RUN",
+    scenario_id=scenario_id,
     seed=config.RANDOM_SEED,
     product_schedule=schedule,
     fault_machine=selected_machine,
@@ -290,9 +303,16 @@ if st.session_state.scenario_hash != current_hash:
     st.session_state.sim_running = True
     st.session_state.whatif_cached = False
 
-# ===== Cached simulation function =====
-@st.cache_data(ttl=3600, show_spinner=False)
-def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
+# ===== FIXED: Manual caching using session_state (no @st.cache_data) =====
+def run_simulation_with_cache(scenario_dict, force_pdm):
+    """Run simulation and cache result in session_state using a unique key."""
+    cache_key = f"{scenario_dict['scenario_id']}_{hashlib.md5(str(scenario_dict).encode()).hexdigest()}_{force_pdm}"
+    
+    if cache_key in st.session_state.sim_cache:
+        # Return cached result
+        return st.session_state.sim_cache[cache_key]
+    
+    # Build scenario from dict
     scenario = ScenarioConfig(
         scenario_id=scenario_dict["scenario_id"],
         seed=scenario_dict["seed"],
@@ -308,9 +328,11 @@ def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
         force_pdm_now=force_pdm
     )
     result = UnifiedSimulationEngine.run(scenario)
+    # Store in cache
+    st.session_state.sim_cache[cache_key] = result
     return result
 
-# ===== Cached What-If function =====
+# ===== Cached What-If function (kept for lazy loading) =====
 @st.cache_data(ttl=3600, show_spinner=False)
 def run_what_if_cached(fault_start_val, max_deg_val, seed_val):
     return FactoryPolicySimulator.run_what_if_analysis(
@@ -338,7 +360,7 @@ if st.session_state.sim_running:
             "policy_type": scenario_base.policy_type,
         }
         force_pdm = st.session_state.get('force_pdm_now', False)
-        st.session_state.sim_result = run_cached_simulation(current_hash, scenario_dict, force_pdm)
+        st.session_state.sim_result = run_simulation_with_cache(scenario_dict, force_pdm)
         st.session_state.force_pdm_now = False
         st.session_state.sim_running = False
         st.rerun()
