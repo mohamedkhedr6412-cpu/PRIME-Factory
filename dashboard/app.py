@@ -125,8 +125,10 @@ j_step = st.session_state.judge_mode_step
 
 if j_step == 1:
     st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
+    # ===== FIXED: Force reset of all state and cache =====
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
+    st.session_state.scenario_hash = None  # Force cache reset
     sim_mode = "Multi-Product Switching (A → B → C)"
     selected_product = "Product_B"
     fault_type = "None (Healthy Baseline)"
@@ -142,7 +144,7 @@ elif j_step == 2:
     selected_product = "Product_B"
     fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
     fault_start = 120
-    max_deg = 0.55  # <--- FIXED: Changed from 0.85 to 0.55
+    max_deg = 0.55  # FIXED: Reduced from 0.85 to 0.55 for early detection
     enable_chaos = False
     apply_dr = False
 elif j_step == 3:
@@ -154,6 +156,7 @@ elif j_step == 3:
     max_deg = 0.85
     enable_chaos = False
     apply_dr = False
+    # ===== FIXED: Auto-trigger PdM in Step 3 =====
     if not st.session_state.get("pdm_triggered_in_step3", False):
         st.session_state.force_pdm_now = True
         st.session_state.pdm_triggered_in_step3 = True
