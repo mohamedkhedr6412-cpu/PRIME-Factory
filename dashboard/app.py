@@ -77,6 +77,9 @@ if "whatif_cached" not in st.session_state:
     st.session_state.whatif_cached = False
 if "pdm_triggered_in_step3" not in st.session_state:
     st.session_state.pdm_triggered_in_step3 = False
+# ===== NEW: Track if Step 1 has been initialized =====
+if "step1_initialized" not in st.session_state:
+    st.session_state.step1_initialized = False
 
 
 st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v6.2")
@@ -104,6 +107,7 @@ with col_j1:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = False
+        st.session_state.step1_initialized = False  # <--- NEW
         st.rerun()
 with col_j2:
     if st.button("⏮️ Reset Pitch", use_container_width=True):
@@ -118,18 +122,21 @@ with col_j2:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = False
+        st.session_state.step1_initialized = False  # <--- NEW
         st.rerun()
 
 # ---- Judge Step Display ----
 j_step = st.session_state.judge_mode_step
 
-# ===== FIXED: Step 1 with cache reset and proper state =====
+# ===== FIXED: Step 1 with cache reset ONLY on first entry =====
 if j_step == 1:
     st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
-    # ===== FIXED: Force reset of cache and state =====
-    st.session_state.force_pdm_now = False
-    st.session_state.pdm_triggered_in_step3 = False
-    st.session_state.scenario_hash = None  # Force cache reset
+    # Only reset cache if we haven't initialized Step 1 yet
+    if not st.session_state.step1_initialized:
+        st.session_state.force_pdm_now = False
+        st.session_state.pdm_triggered_in_step3 = False
+        st.session_state.scenario_hash = None  # Force cache reset
+        st.session_state.step1_initialized = True
     sim_mode = "Multi-Product Switching (A → B → C)"
     selected_product = "Product_B"
     fault_type = "None (Healthy Baseline)"
@@ -138,7 +145,7 @@ if j_step == 1:
     enable_chaos = False
     apply_dr = False
 
-# ===== FIXED: Step 2 with lower severity for proper PREDICTIVE_ALERT =====
+# ===== FIXED: Step 2 with lower severity =====
 elif j_step == 2:
     st.sidebar.warning("📌 **Step 2 (0:20-1:35):** M3 Bearing Wear Onset & XAI Decision Trace.")
     st.session_state.force_pdm_now = False
@@ -147,7 +154,7 @@ elif j_step == 2:
     selected_product = "Product_B"
     fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
     fault_start = 120
-    max_deg = 0.55  # <--- FIXED: Changed from 0.85 to 0.55 for proper PREDICTIVE_ALERT
+    max_deg = 0.55
     enable_chaos = False
     apply_dr = False
 
@@ -196,6 +203,8 @@ else:
     apply_dr = st.sidebar.checkbox("Enable Peak Shaving", value=False)
     st.session_state.pdm_triggered_in_step3 = False
     st.session_state.force_pdm_now = False
+    # Reset step1_initialized when entering manual mode
+    st.session_state.step1_initialized = False
 
 # ---- Machine Selection ----
 selected_machine = st.sidebar.selectbox(
@@ -219,6 +228,7 @@ with col_btn1:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = True
+        st.session_state.step1_initialized = False
         st.rerun()
 with col_btn2:
     if st.button("🔄 Reset Line", use_container_width=True):
@@ -233,6 +243,7 @@ with col_btn2:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = False
+        st.session_state.step1_initialized = False
         st.rerun()
 
 # ---- Playback ----
