@@ -125,7 +125,6 @@ j_step = st.session_state.judge_mode_step
 
 if j_step == 1:
     st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
-    # ===== FIXED: Force reset force_pdm_now and pdm_triggered_in_step3 =====
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
     sim_mode = "Multi-Product Switching (A → B → C)"
@@ -137,14 +136,13 @@ if j_step == 1:
     apply_dr = False
 elif j_step == 2:
     st.sidebar.warning("📌 **Step 2 (0:20-1:35):** M3 Bearing Wear Onset & XAI Decision Trace.")
-    # ===== FIXED: Force reset force_pdm_now and pdm_triggered_in_step3 =====
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
     sim_mode = "Fixed Product Regime"
     selected_product = "Product_B"
     fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
     fault_start = 120
-    max_deg = 0.85
+    max_deg = 0.55  # <--- FIXED: Changed from 0.85 to 0.55
     enable_chaos = False
     apply_dr = False
 elif j_step == 3:
@@ -156,7 +154,6 @@ elif j_step == 3:
     max_deg = 0.85
     enable_chaos = False
     apply_dr = False
-    # ===== FIXED: Auto-trigger PdM in Step 3 =====
     if not st.session_state.get("pdm_triggered_in_step3", False):
         st.session_state.force_pdm_now = True
         st.session_state.pdm_triggered_in_step3 = True
@@ -189,7 +186,6 @@ else:
     max_deg = st.sidebar.slider("Severity (%):", 10, 85, 75) / 100.0
     enable_chaos = st.sidebar.checkbox("Chaos Stress-Test (Sensor Noise)", value=False)
     apply_dr = st.sidebar.checkbox("Enable Peak Shaving", value=False)
-    # ===== FIXED: Reset PdM trigger flag when entering manual mode =====
     st.session_state.pdm_triggered_in_step3 = False
     st.session_state.force_pdm_now = False
 
