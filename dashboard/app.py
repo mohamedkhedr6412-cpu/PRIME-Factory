@@ -128,7 +128,7 @@ if j_step == 1:
     st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
-    st.session_state.scenario_hash = None  # <--- مفتاح الحل
+    st.session_state.scenario_hash = None  # Force reset
     sim_mode = "Multi-Product Switching (A → B → C)"
     selected_product = "Product_B"
     fault_type = "None (Healthy Baseline)"
@@ -144,7 +144,7 @@ elif j_step == 2:
     selected_product = "Product_B"
     fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
     fault_start = 120
-    max_deg = 0.55
+    max_deg = 0.55  # FIXED: Reduced for early detection
     enable_chaos = False
     apply_dr = False
 elif j_step == 3:
@@ -294,9 +294,9 @@ if st.session_state.scenario_hash != current_hash:
     st.session_state.sim_running = True
     st.session_state.whatif_cached = False
 
-# ===== Cached simulation function =====
-@st.cache_data(ttl=3600, show_spinner=False)
-def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
+# ===== FIXED: REMOVED st.cache_data to avoid stale results =====
+def run_simulation(scenario_dict, force_pdm):
+    """Run the simulation without cache to ensure fresh results."""
     scenario = ScenarioConfig(
         scenario_id=scenario_dict["scenario_id"],
         seed=scenario_dict["seed"],
@@ -311,10 +311,9 @@ def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
         policy_type=scenario_dict["policy_type"],
         force_pdm_now=force_pdm
     )
-    result = UnifiedSimulationEngine.run(scenario)
-    return result
+    return UnifiedSimulationEngine.run(scenario)
 
-# ===== Cached What-If function =====
+# ===== Cached What-If function (keep cache as it's optional) =====
 @st.cache_data(ttl=3600, show_spinner=False)
 def run_what_if_cached(fault_start_val, max_deg_val, seed_val):
     return FactoryPolicySimulator.run_what_if_analysis(
@@ -342,7 +341,7 @@ if st.session_state.sim_running:
             "policy_type": scenario_base.policy_type,
         }
         force_pdm = st.session_state.get('force_pdm_now', False)
-        st.session_state.sim_result = run_cached_simulation(current_hash, scenario_dict, force_pdm)
+        st.session_state.sim_result = run_simulation(scenario_dict, force_pdm)
         st.session_state.force_pdm_now = False
         st.session_state.sim_running = False
         st.rerun()
