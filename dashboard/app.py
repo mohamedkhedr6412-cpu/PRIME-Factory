@@ -93,6 +93,9 @@ if "enable_chaos" not in st.session_state:
     st.session_state.enable_chaos = False
 if "apply_dr" not in st.session_state:
     st.session_state.apply_dr = False
+# ===== NEW: Track if simulation has been run manually =====
+if "sim_has_run" not in st.session_state:
+    st.session_state.sim_has_run = False
 
 
 st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v6.2")
@@ -119,6 +122,8 @@ with col_j1:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = False
+        st.session_state.sim_running = False
+        st.session_state.sim_has_run = False
         st.rerun()
 with col_j2:
     if st.button("⏮️ Reset Pitch", use_container_width=True):
@@ -132,6 +137,8 @@ with col_j2:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = False
+        st.session_state.sim_running = False
+        st.session_state.sim_has_run = False
         st.rerun()
 
 # ---- Update scenario parameters based on judge_mode_step ----
@@ -140,6 +147,7 @@ def update_scenario_params(step):
     # Reset simulation result to force fresh run
     st.session_state.sim_result = None
     st.session_state.scenario_hash = None
+    st.session_state.sim_has_run = False
     
     if step == 1:
         st.session_state.sim_mode = "Multi-Product Switching (A → B → C)"
@@ -157,7 +165,7 @@ def update_scenario_params(step):
         st.session_state.selected_product = "Product_B"
         st.session_state.fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
         st.session_state.fault_start = 120
-        st.session_state.max_deg = 0.35  # FIXED: Reduced from 0.55 to 0.35 for PREDICTIVE_ALERT
+        st.session_state.max_deg = 0.35  # FIXED: Reduced from 0.55 for PREDICTIVE_ALERT
         st.session_state.enable_chaos = False
         st.session_state.apply_dr = False
         st.session_state.force_pdm_now = False
@@ -235,6 +243,7 @@ with col_btn1:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = True
+        st.session_state.sim_has_run = False
         st.rerun()
 with col_btn2:
     if st.button("🔄 Reset Line", use_container_width=True):
@@ -249,7 +258,16 @@ with col_btn2:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = False
+        st.session_state.sim_running = False
+        st.session_state.sim_has_run = False
         st.rerun()
+
+# ---- NEW: Run Simulation Button (prevents automatic execution) ----
+st.sidebar.divider()
+if st.sidebar.button("▶️ Run Simulation", type="primary", use_container_width=True):
+    st.session_state.sim_running = True
+    st.session_state.sim_has_run = False
+    st.rerun()
 
 # ---- Playback ----
 time_scrubber = st.sidebar.slider(
@@ -311,12 +329,14 @@ if st.session_state.scenario_hash != current_hash:
     st.session_state.whatif_hash = None
     st.session_state.benchmark_result = None
     st.session_state.ablation_result = None
-    st.session_state.sim_running = True
+    st.session_state.sim_running = False  # FIXED: Do NOT auto-start
     st.session_state.whatif_cached = False
+    st.session_state.sim_has_run = False
 
-# ===== FIXED: REMOVED st.cache_data to avoid stale results =====
-def run_simulation(scenario_dict, force_pdm):
-    """Run the simulation without cache to ensure fresh results."""
+# ===== FIXED: Re-added st.cache_data with limits =====
+@st.cache_data(ttl=3600, max_entries=3, show_spinner=False)
+def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
+    """Run the simulation with caching to avoid repeated heavy computations."""
     scenario = ScenarioConfig(
         scenario_id=scenario_dict["scenario_id"],
         seed=scenario_dict["seed"],
@@ -333,7 +353,7 @@ def run_simulation(scenario_dict, force_pdm):
     )
     return UnifiedSimulationEngine.run(scenario)
 
-# ===== Cached What-If function (keep cache as it's optional) =====
+# ===== Cached What-If function =====
 @st.cache_data(ttl=3600, show_spinner=False)
 def run_what_if_cached(fault_start_val, max_deg_val, seed_val):
     return FactoryPolicySimulator.run_what_if_analysis(
@@ -361,13 +381,14 @@ if st.session_state.sim_running:
             "policy_type": scenario_base.policy_type,
         }
         force_pdm = st.session_state.get('force_pdm_now', False)
-        st.session_state.sim_result = run_simulation(scenario_dict, force_pdm)
+        st.session_state.sim_result = run_cached_simulation(current_hash, scenario_dict, force_pdm)
         st.session_state.force_pdm_now = False
         st.session_state.sim_running = False
+        st.session_state.sim_has_run = True
         st.rerun()
 
 # ===== IF SIMULATION DONE, SHOW RESULTS =====
-if st.session_state.sim_result is not None:
+if st.session_state.sim_result is not None and st.session_state.sim_has_run:
     sim_result = st.session_state.sim_result
 
     df_all = sim_result.telemetry_df
@@ -834,3 +855,20 @@ if st.session_state.sim_result is not None:
     # ============================================================
     st.divider()
     st.caption("🏭 PRIME-Factory v6.2 | Team MSA | RoboDam 2026")
+else:
+    # ===== If no simulation has been run, show prompt =====
+    st.info("👆 Click the **'▶️ Run Simulation'** button in the sidebar to start the PRIME-Factory simulation and view the results.")
+
+    # Show a simple placeholder or a brief description
+    st.markdown("""
+    ### 🏭 PRIME-Factory v6.2
+
+    **Ready to explore the smart factory decision-support system.**
+
+    - **Judge Mode**: Use the sidebar to navigate through the 3-minute demo flow.
+    - **Manual Mode**: Configure your own fault scenario and run the simulation.
+    - **After running**: Explore the tabs for live telemetry, decision traces, evidence chains, and more.
+
+    ---
+    **Click 'Run Simulation' to get started!** 🚀
+    """)
