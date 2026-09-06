@@ -123,15 +123,13 @@ with col_j2:
 # ---- Judge Step Display ----
 j_step = st.session_state.judge_mode_step
 
-# ===== FIXED: Step 1 with complete reset =====
+# ===== FIXED: Assign unique scenario_id for each step =====
 if j_step == 1:
     st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
-    # ===== FORCE COMPLETE RESET =====
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
-    st.session_state.sim_result = None          # Clear old simulation result
-    st.session_state.sim_running = True         # Force new simulation
-    st.session_state.scenario_hash = f"step1_{time.time()}"  # Unique hash to avoid cache
+    # Use unique scenario_id to avoid cache collisions
+    scenario_id = "STEP1_HEALTHY"
     sim_mode = "Multi-Product Switching (A → B → C)"
     selected_product = "Product_B"
     fault_type = "None (Healthy Baseline)"
@@ -140,11 +138,11 @@ if j_step == 1:
     enable_chaos = False
     apply_dr = False
 
-# ===== FIXED: Step 2 with lower severity =====
 elif j_step == 2:
     st.sidebar.warning("📌 **Step 2 (0:20-1:35):** M3 Bearing Wear Onset & XAI Decision Trace.")
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
+    scenario_id = "STEP2_FAULT"
     sim_mode = "Fixed Product Regime"
     selected_product = "Product_B"
     fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
@@ -153,9 +151,9 @@ elif j_step == 2:
     enable_chaos = False
     apply_dr = False
 
-# ===== Step 3: Auto-trigger PdM =====
 elif j_step == 3:
     st.sidebar.success("📌 **Step 3 (1:35-3:00):** Causal PdM Intervention, Recovery & What-If ROI.")
+    scenario_id = "STEP3_PDM"
     sim_mode = "Fixed Product Regime"
     selected_product = "Product_B"
     fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
@@ -171,6 +169,7 @@ elif j_step == 3:
 else:
     # Manual mode
     st.sidebar.subheader("⚙️ Manual Configuration")
+    scenario_id = "LIVE_DASHBOARD_RUN"  # Keep original ID for manual mode
     sim_mode = st.sidebar.radio(
         "Operating Schedule:",
         ["Fixed Product Regime", "Multi-Product Switching (A → B → C)"],
@@ -273,7 +272,7 @@ def compute_scenario_hash(scenario):
 
 # Build scenario (without force_pdm_now for hashing)
 scenario_base = ScenarioConfig(
-    scenario_id="LIVE_DASHBOARD_RUN",
+    scenario_id=scenario_id,  # <--- Use the unique scenario_id
     seed=config.RANDOM_SEED,
     product_schedule=schedule,
     fault_machine=selected_machine,
