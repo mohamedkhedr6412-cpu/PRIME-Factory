@@ -19,6 +19,7 @@ import json
 import hashlib
 import time
 import functools
+import traceback
 
 import config
 from core.models import ScenarioConfig
@@ -77,7 +78,7 @@ if "whatif_cached" not in st.session_state:
     st.session_state.whatif_cached = False
 if "pdm_triggered_in_step3" not in st.session_state:
     st.session_state.pdm_triggered_in_step3 = False
-# ===== NEW: Manual cache for simulation results =====
+# ===== Manual cache for simulation results =====
 if "sim_cache" not in st.session_state:
     st.session_state.sim_cache = {}
 
@@ -129,8 +130,8 @@ j_step = st.session_state.judge_mode_step
 # ===== FIXED: Assign unique scenario_id for each step =====
 if j_step == 1:
     st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
-    # ===== FIXED: Force reset everything for healthy baseline =====
-    st.session_state.sim_cache.clear()  # Clear all cached results
+    # ===== Force reset everything for healthy baseline =====
+    st.session_state.sim_cache.clear()
     st.session_state.sim_result = None
     st.session_state.scenario_hash = None
     st.session_state.force_pdm_now = False
@@ -153,7 +154,7 @@ elif j_step == 2:
     selected_product = "Product_B"
     fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
     fault_start = 120
-    max_deg = 0.55  # FIXED: Reduced from 0.85 for proper PREDICTIVE_ALERT display
+    max_deg = 0.55
     enable_chaos = False
     apply_dr = False
 
@@ -262,7 +263,6 @@ else:
     from simulation.faults import generate_switching_schedule
     schedule = generate_switching_schedule(config.TOTAL_TIMESTEPS)
 
-# ===== FIXED: Include scenario_id in the hash =====
 def compute_scenario_hash(scenario):
     """Compute a deterministic hash for the scenario, including scenario_id."""
     hash_input = (
@@ -307,12 +307,20 @@ if st.session_state.scenario_hash != current_hash:
     st.session_state.sim_running = True
     st.session_state.whatif_cached = False
 
-# ===== FIXED: Manual caching using session_state (no @st.cache_data) =====
+# ===== FIXED: Robust run function with error handling =====
 def run_simulation_with_cache(scenario_dict, force_pdm):
     """Run simulation and cache result in session_state using a unique key."""
-    # ===== FIXED: Skip cache for healthy baseline =====
-    if scenario_dict.get("scenario_id") == "STEP1_HEALTHY":
-        # Run fresh simulation without caching
+    # Create cache key
+    scenario_id = scenario_dict.get("scenario_id", "UNKNOWN")
+    dict_hash = hashlib.md5(str(scenario_dict).encode()).hexdigest()
+    cache_key = f"{scenario_id}_{dict_hash}_{force_pdm}"
+    
+    # Check cache
+    if cache_key in st.session_state.sim_cache:
+        return st.session_state.sim_cache[cache_key]
+    
+    # Build scenario
+    try:
         scenario = ScenarioConfig(
             scenario_id=scenario_dict["scenario_id"],
             seed=scenario_dict["seed"],
@@ -327,35 +335,17 @@ def run_simulation_with_cache(scenario_dict, force_pdm):
             policy_type=scenario_dict["policy_type"],
             force_pdm_now=force_pdm
         )
-        return UnifiedSimulationEngine.run(scenario)
-    
-    cache_key = f"{scenario_dict['scenario_id']}_{hashlib.md5(str(scenario_dict).encode()).hexdigest()}_{force_pdm}"
-    
-    if cache_key in st.session_state.sim_cache:
-        # Return cached result
-        return st.session_state.sim_cache[cache_key]
-    
-    # Build scenario from dict
-    scenario = ScenarioConfig(
-        scenario_id=scenario_dict["scenario_id"],
-        seed=scenario_dict["seed"],
-        product_schedule=scenario_dict["product_schedule"],
-        fault_machine=scenario_dict["fault_machine"],
-        fault_type=scenario_dict["fault_type"],
-        fault_start=scenario_dict["fault_start"],
-        max_degradation=scenario_dict["max_degradation"],
-        enable_chaos=scenario_dict["enable_chaos"],
-        enable_peak_shaving=scenario_dict["enable_peak_shaving"],
-        manual_pdm_timestep=scenario_dict["manual_pdm_timestep"],
-        policy_type=scenario_dict["policy_type"],
-        force_pdm_now=force_pdm
-    )
-    result = UnifiedSimulationEngine.run(scenario)
-    # Store in cache
-    st.session_state.sim_cache[cache_key] = result
-    return result
+        result = UnifiedSimulationEngine.run(scenario)
+        # Store in cache
+        st.session_state.sim_cache[cache_key] = result
+        return result
+    except Exception as e:
+        # Show error and re-raise to be caught by the caller
+        st.error(f"Simulation error: {e}")
+        st.error(traceback.format_exc())
+        raise
 
-# ===== Cached What-If function (kept for lazy loading) =====
+# ===== Cached What-If function =====
 @st.cache_data(ttl=3600, show_spinner=False)
 def run_what_if_cached(fault_start_val, max_deg_val, seed_val):
     return FactoryPolicySimulator.run_what_if_analysis(
@@ -369,24 +359,30 @@ def run_what_if_cached(fault_start_val, max_deg_val, seed_val):
 # ===== DISPLAY SIMULATION STATUS =====
 if st.session_state.sim_running:
     with st.spinner("🔄 Running PRIME-Factory simulation... This may take 30-60 seconds."):
-        scenario_dict = {
-            "scenario_id": scenario_base.scenario_id,
-            "seed": scenario_base.seed,
-            "product_schedule": scenario_base.product_schedule,
-            "fault_machine": scenario_base.fault_machine,
-            "fault_type": scenario_base.fault_type,
-            "fault_start": scenario_base.fault_start,
-            "max_degradation": scenario_base.max_degradation,
-            "enable_chaos": scenario_base.enable_chaos,
-            "enable_peak_shaving": scenario_base.enable_peak_shaving,
-            "manual_pdm_timestep": scenario_base.manual_pdm_timestep,
-            "policy_type": scenario_base.policy_type,
-        }
-        force_pdm = st.session_state.get('force_pdm_now', False)
-        st.session_state.sim_result = run_simulation_with_cache(scenario_dict, force_pdm)
-        st.session_state.force_pdm_now = False
-        st.session_state.sim_running = False
-        st.rerun()
+        try:
+            scenario_dict = {
+                "scenario_id": scenario_base.scenario_id,
+                "seed": scenario_base.seed,
+                "product_schedule": scenario_base.product_schedule,
+                "fault_machine": scenario_base.fault_machine,
+                "fault_type": scenario_base.fault_type,
+                "fault_start": scenario_base.fault_start,
+                "max_degradation": scenario_base.max_degradation,
+                "enable_chaos": scenario_base.enable_chaos,
+                "enable_peak_shaving": scenario_base.enable_peak_shaving,
+                "manual_pdm_timestep": scenario_base.manual_pdm_timestep,
+                "policy_type": scenario_base.policy_type,
+            }
+            force_pdm = st.session_state.get('force_pdm_now', False)
+            st.session_state.sim_result = run_simulation_with_cache(scenario_dict, force_pdm)
+            st.session_state.force_pdm_now = False
+            st.session_state.sim_running = False
+            st.rerun()
+        except Exception as e:
+            st.session_state.sim_running = False
+            st.session_state.sim_result = None
+            st.error(f"Simulation failed: {e}")
+            st.stop()
 
 # ===== IF SIMULATION DONE, SHOW RESULTS =====
 if st.session_state.sim_result is not None:
