@@ -17,6 +17,7 @@ FIXED: Evidence ACTION/OUTCOME linked to SAME trace via trace_id_by_machine.
 FIXED: downtime_avoided_min = 0.0 (computed in counterfactual).
 FIXED: production_loss_units = 0 (computed in counterfactual).
 FIXED: RUL string shows "~30 min" when health is below PREDICTIVE_ALERT threshold.
+FIXED: Maintenance is skipped if max_degradation == 0 (healthy scenario).
 """
 
 from typing import List, Dict, Any, Optional
@@ -147,7 +148,7 @@ class UnifiedSimulationEngine:
         recovery_end_t_by_machine = {}
 
         # ===== FIXED: Evidence trace tracking per-machine =====
-        trace_id_by_machine = {}  # NEW: trace_id for each machine
+        trace_id_by_machine = {}
 
         records = []
         hi_histories = {mid: [] for mid in factory.machines}
@@ -186,8 +187,9 @@ class UnifiedSimulationEngine:
                     current_power=current_power
                 )
 
-            # ===== FIXED: Check for force_pdm_now =====
-            if scenario.force_pdm_now and not predictive_maintenance_executed and not forced_pdm_executed:
+            # ===== FIXED: Check for force_pdm_now (skip if healthy scenario) =====
+            if (scenario.force_pdm_now and not predictive_maintenance_executed and not forced_pdm_executed and
+                scenario.max_degradation > 0.0):
                 mid = scenario.fault_machine
                 sm = state_machines[mid]
                 if sm.current_state != config.STATE_MAINTENANCE:
@@ -202,7 +204,6 @@ class UnifiedSimulationEngine:
                     recovery_start_t_by_machine[mid] = t
                     event_log.add_event(t, "MAINTENANCE_EXECUTED", "FORCED", mid,
                                        f"Forced PdM executed at t={t} via Dashboard button.")
-                    # ===== FIXED: Add ACTION evidence using trace_id_by_machine =====
                     UnifiedSimulationEngine._add_action_evidence(
                         evidence_tracker, mid, t, trace_id_by_machine,
                         action_type="Forced",
@@ -211,9 +212,9 @@ class UnifiedSimulationEngine:
                         rul_minutes=None
                     )
 
-            # ===== FIXED: Force maintenance for PREVENTIVE only =====
+            # ===== FIXED: Force maintenance for PREVENTIVE only (skip if healthy) =====
             if scenario.policy_type == "PREVENTIVE":
-                if not predictive_maintenance_executed and not forced_pdm_executed:
+                if not predictive_maintenance_executed and not forced_pdm_executed and scenario.max_degradation > 0.0:
                     if t == 120:
                         mid = scenario.fault_machine
                         sm = state_machines[mid]
@@ -395,7 +396,7 @@ class UnifiedSimulationEngine:
                     context=context
                 )
 
-                # ===== PREDICTIVE MAINTENANCE (AI decision only) =====
+                # ===== PREDICTIVE MAINTENANCE (AI decision only) - skip if healthy =====
                 is_predictive_policy = scenario.policy_type == "PREDICTIVE"
                 is_pdm_decision = (decision.decision_code == DecisionCode.SCHEDULE_PDM)
                 is_pdm_priority = decision.priority in ["MEDIUM", "HIGH"]
@@ -404,7 +405,8 @@ class UnifiedSimulationEngine:
                     mid == scenario.fault_machine and
                     sm.current_state != config.STATE_MAINTENANCE and
                     not predictive_maintenance_executed and
-                    not forced_pdm_executed):
+                    not forced_pdm_executed and
+                    scenario.max_degradation > 0.0):
                     is_repairing = True
                     repair_timer = config.MAINTENANCE_DURATION_MINUTES
                     machines_in_maintenance.add(mid)
@@ -462,7 +464,6 @@ class UnifiedSimulationEngine:
                         decision_id=decision.decision_id
                     )
                     trace_id = trace.trace_id
-                    # ===== FIXED: Store trace_id for this machine =====
                     if trace_id is not None:
                         trace_id_by_machine[mid] = trace_id
 
@@ -485,7 +486,6 @@ class UnifiedSimulationEngine:
                                 t, "RECOVERY_COMPLETED", "INFO", mid,
                                 f"Asset recovered to healthy baseline (HI: {health_index:.1f})"
                             )
-                            # ===== FIXED: Add OUTCOME using trace_id_by_machine =====
                             if mid in trace_id_by_machine:
                                 trace_id_to_complete = trace_id_by_machine[mid]
                                 completed_trace = evidence_tracker.get_trace(trace_id_to_complete)
@@ -640,16 +640,14 @@ class UnifiedSimulationEngine:
         if mid in recovery_start_t_by_machine and mid in recovery_end_t_by_machine:
             recovery_time = recovery_end_t_by_machine[mid] - recovery_start_t_by_machine[mid]
 
-        # ===== FIXED: downtime_avoided_min and production_loss_units are set to 0 (computed in policies.py) =====
         resilience = ResilienceMetrics(
             recovery_time_min=float(recovery_time),
-            production_loss_units=0,  # FIXED: computed in counterfactual
-            downtime_avoided_min=0.0,  # FIXED: computed in counterfactual
+            production_loss_units=0,
+            downtime_avoided_min=0.0,
             recovery_success=recovery_success,
             failure_avoided=failure_avoided
         )
 
-        # ===== 8. Return results =====
         return SimulationResult(
             config=scenario,
             telemetry_df=telemetry_df,
@@ -697,18 +695,14 @@ class UnifiedSimulationEngine:
         """
         trace_id = trace_id_by_machine.get(machine_id)
         if trace_id is None:
-            # No trace found for this machine - this should not happen if the trace was created before action.
-            # As a fallback, find the latest trace for this machine.
             traces = evidence_tracker.get_traces_by_machine(machine_id)
             if traces:
                 trace_id = traces[-1].trace_id
             else:
-                # No trace exists at all - return without adding action.
                 return
 
         trace = evidence_tracker.get_trace(trace_id)
         if trace:
-            # Check if ACTION already exists to avoid duplicates
             step_types = [s.step_type for s in trace.steps]
             if "ACTION" not in step_types:
                 evidence_tracker.add_evidence_step(

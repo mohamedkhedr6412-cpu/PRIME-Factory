@@ -129,6 +129,7 @@ j_step = st.session_state.judge_mode_step
 # ===== FIXED: Assign unique scenario_id for each step =====
 if j_step == 1:
     st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
+    # ===== FIXED: Force reset of force_pdm_now =====
     st.session_state.force_pdm_now = False
     st.session_state.pdm_triggered_in_step3 = False
     scenario_id = "STEP1_HEALTHY"
@@ -197,6 +198,7 @@ else:
     max_deg = st.sidebar.slider("Severity (%):", 10, 85, 75) / 100.0
     enable_chaos = st.sidebar.checkbox("Chaos Stress-Test (Sensor Noise)", value=False)
     apply_dr = st.sidebar.checkbox("Enable Peak Shaving", value=False)
+    # ===== FIXED: Force reset of force_pdm_now when entering manual mode =====
     st.session_state.pdm_triggered_in_step3 = False
     st.session_state.force_pdm_now = False
 
