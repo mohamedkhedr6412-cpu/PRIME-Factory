@@ -262,11 +262,12 @@ with col_btn2:
         st.session_state.sim_has_run = False
         st.rerun()
 
-# ---- NEW: Run Simulation Button (prevents automatic execution) ----
+# ---- Run Simulation Button (FIXED: force re-run) ----
 st.sidebar.divider()
 if st.sidebar.button("▶️ Run Simulation", type="primary", use_container_width=True):
     st.session_state.sim_running = True
     st.session_state.sim_has_run = False
+    st.session_state.scenario_hash = None  # Force re-run
     st.rerun()
 
 # ---- Playback ----
@@ -329,11 +330,11 @@ if st.session_state.scenario_hash != current_hash:
     st.session_state.whatif_hash = None
     st.session_state.benchmark_result = None
     st.session_state.ablation_result = None
-    st.session_state.sim_running = False  # FIXED: Do NOT auto-start
+    st.session_state.sim_running = False  # Do NOT auto-start
     st.session_state.whatif_cached = False
     st.session_state.sim_has_run = False
 
-# ===== FIXED: Re-added st.cache_data with limits =====
+# ===== Cached simulation function =====
 @st.cache_data(ttl=3600, max_entries=3, show_spinner=False)
 def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
     """Run the simulation with caching to avoid repeated heavy computations."""
@@ -859,7 +860,6 @@ else:
     # ===== If no simulation has been run, show prompt =====
     st.info("👆 Click the **'▶️ Run Simulation'** button in the sidebar to start the PRIME-Factory simulation and view the results.")
 
-    # Show a simple placeholder or a brief description
     st.markdown("""
     ### 🏭 PRIME-Factory v6.2
 
