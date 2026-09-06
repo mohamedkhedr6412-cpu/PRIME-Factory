@@ -1,5 +1,5 @@
 """
-PRIME-Factory Interactive Industrial Control & Decision Center v6.2
+PRIME-Factory Interactive Industrial Control & Decision Center v6.2 (Ultra-Fast)
 Features: Multi-Product Contexts, Physical Telemetry, XAI Decision Trace, Deterministic What-If,
 Causal PdM Execution Lifecycle, Industrial Resilience, and 3-Minute Judge Mode Wizard.
 Now with explicit force_pdm_now for interactive control and lazy-loaded heavy computations.
@@ -18,6 +18,7 @@ from plotly.subplots import make_subplots
 import json
 import hashlib
 import time
+import functools
 
 import config
 from core.models import ScenarioConfig
@@ -77,23 +78,6 @@ if "whatif_cached" not in st.session_state:
 if "pdm_triggered_in_step3" not in st.session_state:
     st.session_state.pdm_triggered_in_step3 = False
 
-if "sim_mode" not in st.session_state:
-    st.session_state.sim_mode = "Multi-Product Switching (A → B → C)"
-if "selected_product" not in st.session_state:
-    st.session_state.selected_product = "Product_B"
-if "fault_type" not in st.session_state:
-    st.session_state.fault_type = "None (Healthy Baseline)"
-if "fault_start" not in st.session_state:
-    st.session_state.fault_start = 120
-if "max_deg" not in st.session_state:
-    st.session_state.max_deg = 0.0
-if "enable_chaos" not in st.session_state:
-    st.session_state.enable_chaos = False
-if "apply_dr" not in st.session_state:
-    st.session_state.apply_dr = False
-if "sim_has_run" not in st.session_state:
-    st.session_state.sim_has_run = False
-
 
 st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v6.2")
 st.caption("National Competition for AI and Robotics (RoboDam 2026) | Team MSA")
@@ -110,6 +94,7 @@ col_j1, col_j2 = st.sidebar.columns(2)
 with col_j1:
     if st.button("▶️ Next Demo Step", type="primary", use_container_width=True):
         st.session_state.judge_mode_step = (st.session_state.judge_mode_step + 1) % 4
+        st.session_state.manual_pdm_timestep = None
         st.session_state.sim_result = None
         st.session_state.scenario_hash = None
         st.session_state.whatif_result = None
@@ -119,12 +104,11 @@ with col_j1:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = False
-        st.session_state.sim_running = False
-        st.session_state.sim_has_run = False
         st.rerun()
 with col_j2:
     if st.button("⏮️ Reset Pitch", use_container_width=True):
         st.session_state.judge_mode_step = 0
+        st.session_state.manual_pdm_timestep = None
         st.session_state.sim_result = None
         st.session_state.scenario_hash = None
         st.session_state.whatif_result = None
@@ -134,88 +118,84 @@ with col_j2:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = False
-        st.session_state.sim_running = False
-        st.session_state.sim_has_run = False
         st.rerun()
 
-# ---- Update scenario parameters based on judge_mode_step ----
-def update_scenario_params(step):
-    """Set scenario parameters based on the current step."""
-    # ===== FIXED: Force hash reset for Step 1 to clear stale data =====
-    if step == 1:
-        st.session_state.sim_mode = "Multi-Product Switching (A → B → C)"
-        st.session_state.selected_product = "Product_B"
-        st.session_state.fault_type = "None (Healthy Baseline)"
-        st.session_state.fault_start = 120
-        st.session_state.max_deg = 0.0
-        st.session_state.enable_chaos = False
-        st.session_state.apply_dr = False
-        st.session_state.force_pdm_now = False
-        st.session_state.pdm_triggered_in_step3 = False
-        # Force a rerun of simulation by clearing the hash
-        st.session_state.scenario_hash = None
-        st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
-    elif step == 2:
-        st.session_state.sim_mode = "Fixed Product Regime"
-        st.session_state.selected_product = "Product_B"
-        st.session_state.fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
-        st.session_state.fault_start = 120
-        # ===== FIXED: Reduced from 0.35 to 0.30 to ensure PREDICTIVE_ALERT =====
-        st.session_state.max_deg = 0.30
-        st.session_state.enable_chaos = False
-        st.session_state.apply_dr = False
-        st.session_state.force_pdm_now = False
-        st.session_state.pdm_triggered_in_step3 = False
-        st.sidebar.warning("📌 **Step 2 (0:20-1:35):** M3 Bearing Wear Onset & XAI Decision Trace.")
-    elif step == 3:
-        st.session_state.sim_mode = "Fixed Product Regime"
-        st.session_state.selected_product = "Product_B"
-        st.session_state.fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
-        st.session_state.fault_start = 120
-        st.session_state.max_deg = 0.85
-        st.session_state.enable_chaos = False
-        st.session_state.apply_dr = False
-        st.sidebar.success("📌 **Step 3 (1:35-3:00):** Causal PdM Intervention, Recovery & What-If ROI.")
-        if not st.session_state.get("pdm_triggered_in_step3", False):
-            st.session_state.force_pdm_now = True
-            st.session_state.pdm_triggered_in_step3 = True
-            st.rerun()
-    else:
-        # Manual mode
-        st.sidebar.subheader("⚙️ Manual Configuration")
-        st.session_state.sim_mode = st.sidebar.radio(
-            "Operating Schedule:",
-            ["Fixed Product Regime", "Multi-Product Switching (A → B → C)"],
-            index=0
-        )
-        if st.session_state.sim_mode == "Fixed Product Regime":
-            st.session_state.selected_product = st.sidebar.selectbox(
-                "Active Product:",
-                ["Product_A", "Product_B", "Product_C"],
-                index=1
-            )
-        else:
-            st.session_state.selected_product = "Product_B"
-        st.session_state.fault_type = st.sidebar.selectbox(
-            "Fault Type:",
-            [
-                "None (Healthy Baseline)",
-                "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)",
-                "Mechanical Friction (Power Surge ↑ + High ECI)",
-                "Electrical Anomaly (Current Distortion + PF Drop)"
-            ],
+# ---- Judge Step Display ----
+j_step = st.session_state.judge_mode_step
+
+# ===== FIXED: Step 1 with cache reset and proper state =====
+if j_step == 1:
+    st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
+    # ===== FIXED: Force reset of cache and state =====
+    st.session_state.force_pdm_now = False
+    st.session_state.pdm_triggered_in_step3 = False
+    st.session_state.scenario_hash = None  # Force cache reset
+    sim_mode = "Multi-Product Switching (A → B → C)"
+    selected_product = "Product_B"
+    fault_type = "None (Healthy Baseline)"
+    fault_start = 120
+    max_deg = 0.0
+    enable_chaos = False
+    apply_dr = False
+
+# ===== FIXED: Step 2 with lower severity for proper PREDICTIVE_ALERT =====
+elif j_step == 2:
+    st.sidebar.warning("📌 **Step 2 (0:20-1:35):** M3 Bearing Wear Onset & XAI Decision Trace.")
+    st.session_state.force_pdm_now = False
+    st.session_state.pdm_triggered_in_step3 = False
+    sim_mode = "Fixed Product Regime"
+    selected_product = "Product_B"
+    fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
+    fault_start = 120
+    max_deg = 0.55  # <--- FIXED: Changed from 0.85 to 0.55 for proper PREDICTIVE_ALERT
+    enable_chaos = False
+    apply_dr = False
+
+# ===== Step 3: Auto-trigger PdM =====
+elif j_step == 3:
+    st.sidebar.success("📌 **Step 3 (1:35-3:00):** Causal PdM Intervention, Recovery & What-If ROI.")
+    sim_mode = "Fixed Product Regime"
+    selected_product = "Product_B"
+    fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
+    fault_start = 120
+    max_deg = 0.85
+    enable_chaos = False
+    apply_dr = False
+    if not st.session_state.get("pdm_triggered_in_step3", False):
+        st.session_state.force_pdm_now = True
+        st.session_state.pdm_triggered_in_step3 = True
+        st.rerun()
+
+else:
+    # Manual mode
+    st.sidebar.subheader("⚙️ Manual Configuration")
+    sim_mode = st.sidebar.radio(
+        "Operating Schedule:",
+        ["Fixed Product Regime", "Multi-Product Switching (A → B → C)"],
+        index=0
+    )
+    if sim_mode == "Fixed Product Regime":
+        selected_product = st.sidebar.selectbox(
+            "Active Product:",
+            ["Product_A", "Product_B", "Product_C"],
             index=1
         )
-        st.session_state.fault_start = st.sidebar.slider("Fault Start (min):", 10, 400, 120)
-        st.session_state.max_deg = st.sidebar.slider("Severity (%):", 10, 85, 75) / 100.0
-        st.session_state.enable_chaos = st.sidebar.checkbox("Chaos Stress-Test (Sensor Noise)", value=False)
-        st.session_state.apply_dr = st.sidebar.checkbox("Enable Peak Shaving", value=False)
-        st.session_state.pdm_triggered_in_step3 = False
-        st.session_state.force_pdm_now = False
-
-# ---- Update scenario parameters based on current step ----
-j_step = st.session_state.judge_mode_step
-update_scenario_params(j_step)
+    fault_type = st.sidebar.selectbox(
+        "Fault Type:",
+        [
+            "None (Healthy Baseline)",
+            "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)",
+            "Mechanical Friction (Power Surge ↑ + High ECI)",
+            "Electrical Anomaly (Current Distortion + PF Drop)"
+        ],
+        index=1
+    )
+    fault_start = st.sidebar.slider("Fault Start (min):", 10, 400, 120)
+    max_deg = st.sidebar.slider("Severity (%):", 10, 85, 75) / 100.0
+    enable_chaos = st.sidebar.checkbox("Chaos Stress-Test (Sensor Noise)", value=False)
+    apply_dr = st.sidebar.checkbox("Enable Peak Shaving", value=False)
+    st.session_state.pdm_triggered_in_step3 = False
+    st.session_state.force_pdm_now = False
 
 # ---- Machine Selection ----
 selected_machine = st.sidebar.selectbox(
@@ -239,7 +219,6 @@ with col_btn1:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = True
-        st.session_state.sim_has_run = False
         st.rerun()
 with col_btn2:
     if st.button("🔄 Reset Line", use_container_width=True):
@@ -254,17 +233,7 @@ with col_btn2:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = False
-        st.session_state.sim_running = False
-        st.session_state.sim_has_run = False
         st.rerun()
-
-# ---- Run Simulation Button (working version) ----
-st.sidebar.divider()
-if st.sidebar.button("▶️ Run Simulation", type="primary", use_container_width=True):
-    st.session_state.sim_result = None
-    st.session_state.scenario_hash = None
-    st.session_state.sim_has_run = False
-    st.rerun()
 
 # ---- Playback ----
 time_scrubber = st.sidebar.slider(
@@ -280,61 +249,58 @@ time_scrubber = st.sidebar.slider(
 # ============================================================
 
 # Build schedule
-if st.session_state.sim_mode == "Fixed Product Regime":
-    schedule = [st.session_state.selected_product] * config.TOTAL_TIMESTEPS
+if sim_mode == "Fixed Product Regime":
+    schedule = [selected_product] * config.TOTAL_TIMESTEPS
 else:
     from simulation.faults import generate_switching_schedule
     schedule = generate_switching_schedule(config.TOTAL_TIMESTEPS)
 
-def compute_scenario_hash():
-    """Compute a deterministic hash for the current scenario."""
+def compute_scenario_hash(scenario):
+    """Compute a deterministic hash for the scenario, excluding force_pdm_now."""
     hash_input = (
-        selected_machine,
-        st.session_state.fault_type,
-        st.session_state.fault_start,
-        st.session_state.max_deg,
-        "PREDICTIVE",
-        st.session_state.apply_dr,
-        st.session_state.enable_chaos,
-        tuple(schedule),
+        scenario.fault_machine,
+        scenario.fault_type,
+        scenario.fault_start,
+        scenario.max_degradation,
+        scenario.policy_type,
+        scenario.enable_peak_shaving,
+        scenario.enable_chaos,
+        tuple(scenario.product_schedule),
     )
     return hashlib.md5(str(hash_input).encode()).hexdigest()
 
-# Build scenario
+# Build scenario (without force_pdm_now for hashing)
 scenario_base = ScenarioConfig(
     scenario_id="LIVE_DASHBOARD_RUN",
     seed=config.RANDOM_SEED,
     product_schedule=schedule,
     fault_machine=selected_machine,
-    fault_type=st.session_state.fault_type,
-    fault_start=st.session_state.fault_start,
-    max_degradation=st.session_state.max_deg if st.session_state.fault_type != "None (Healthy Baseline)" else 0.0,
-    enable_chaos=st.session_state.enable_chaos,
-    enable_peak_shaving=st.session_state.apply_dr,
+    fault_type=fault_type,
+    fault_start=fault_start,
+    max_degradation=max_deg if fault_type != "None (Healthy Baseline)" else 0.0,
+    enable_chaos=enable_chaos,
+    enable_peak_shaving=apply_dr,
     manual_pdm_timestep=None,
     policy_type="PREDICTIVE",
     force_pdm_now=False
 )
 
-# Get current hash
-current_hash = compute_scenario_hash()
+current_hash = compute_scenario_hash(scenario_base)
 
-# If the stored hash is None or different from current, trigger a new simulation
-if st.session_state.scenario_hash is None or st.session_state.scenario_hash != current_hash:
+# ---- Check if results are cached ----
+if st.session_state.scenario_hash != current_hash:
     st.session_state.sim_result = None
     st.session_state.scenario_hash = current_hash
     st.session_state.whatif_result = None
     st.session_state.whatif_hash = None
     st.session_state.benchmark_result = None
     st.session_state.ablation_result = None
-    st.session_state.whatif_cached = False
-    st.session_state.sim_has_run = False
     st.session_state.sim_running = True
+    st.session_state.whatif_cached = False
 
 # ===== Cached simulation function =====
-@st.cache_data(ttl=3600, max_entries=3, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
-    """Run the simulation with caching."""
     scenario = ScenarioConfig(
         scenario_id=scenario_dict["scenario_id"],
         seed=scenario_dict["seed"],
@@ -349,7 +315,8 @@ def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
         policy_type=scenario_dict["policy_type"],
         force_pdm_now=force_pdm
     )
-    return UnifiedSimulationEngine.run(scenario)
+    result = UnifiedSimulationEngine.run(scenario)
+    return result
 
 # ===== Cached What-If function =====
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -363,7 +330,7 @@ def run_what_if_cached(fault_start_val, max_deg_val, seed_val):
 
 
 # ===== DISPLAY SIMULATION STATUS =====
-if st.session_state.sim_running and st.session_state.scenario_hash == current_hash:
+if st.session_state.sim_running:
     with st.spinner("🔄 Running PRIME-Factory simulation... This may take 30-60 seconds."):
         scenario_dict = {
             "scenario_id": scenario_base.scenario_id,
@@ -382,11 +349,10 @@ if st.session_state.sim_running and st.session_state.scenario_hash == current_ha
         st.session_state.sim_result = run_cached_simulation(current_hash, scenario_dict, force_pdm)
         st.session_state.force_pdm_now = False
         st.session_state.sim_running = False
-        st.session_state.sim_has_run = True
         st.rerun()
 
 # ===== IF SIMULATION DONE, SHOW RESULTS =====
-if st.session_state.sim_result is not None and st.session_state.sim_has_run:
+if st.session_state.sim_result is not None:
     sim_result = st.session_state.sim_result
 
     df_all = sim_result.telemetry_df
@@ -441,7 +407,7 @@ if st.session_state.sim_result is not None and st.session_state.sim_has_run:
         st.metric(
             "📈 Peak Demand",
             f"{_get(sim_result, 'peak_demand_kw'):.1f} kW",
-            delta="Peak Shaving" if st.session_state.apply_dr else "Standard"
+            delta="Peak Shaving" if apply_dr else "Standard"
         )
     with kpi3:
         st.metric(
@@ -499,24 +465,53 @@ if st.session_state.sim_result is not None and st.session_state.sim_has_run:
         "📑 Experiment Report"
     ])
 
+    # ===== TAB 1: Live Telemetry =====
     with t_live:
-        fig_cond = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
-                                 subplot_titles=(f"Physical Telemetry ({selected_machine})", "Composite Health Index & Thresholds"))
+        fig_cond = make_subplots(
+            rows=2, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.1,
+            subplot_titles=(f"Physical Telemetry ({selected_machine})", "Composite Health Index & Thresholds")
+        )
+
         if "vibration_rms" in df_plot.columns and config.MACHINES[selected_machine]["has_vibration"]:
-            fig_cond.add_trace(go.Scatter(x=df_plot["timestep"], y=df_plot["vibration_rms"], name="Vibration (g RMS)", line=dict(color="#1f77b4", shape='hv')), row=1, col=1)
+            fig_cond.add_trace(
+                go.Scatter(x=df_plot["timestep"], y=df_plot["vibration_rms"],
+                           name="Vibration (g RMS)", line=dict(color="#1f77b4", shape='hv')),
+                row=1, col=1
+            )
+
         if "temperature_c" in df_plot.columns:
-            fig_cond.add_trace(go.Scatter(x=df_plot["timestep"], y=df_plot["temperature_c"], name="Temperature (°C)", line=dict(color="#ff7f0e", shape='hv')), row=1, col=1)
-        if "power_kw" in df_plot.columns:
-            fig_cond.add_trace(go.Scatter(x=df_plot["timestep"], y=df_plot["power_kw"], name="Power (kW)", line=dict(color="#2ca02c", shape='hv')), row=1, col=1)
+            fig_cond.add_trace(
+                go.Scatter(x=df_plot["timestep"], y=df_plot["temperature_c"],
+                           name="Temperature (°C)", line=dict(color="#ff7f0e", shape='hv')),
+                row=1, col=1
+            )
+
+        if "power_kw" in df_plot.columns or "active_power_kw" in df_plot.columns:
+            power_col = "power_kw" if "power_kw" in df_plot.columns else "active_power_kw"
+            fig_cond.add_trace(
+                go.Scatter(x=df_plot["timestep"], y=df_plot[power_col],
+                           name="Power (kW)", line=dict(color="#2ca02c", shape='hv')),
+                row=1, col=1
+            )
+
         if "health_index" in df_plot.columns:
-            fig_cond.add_trace(go.Scatter(x=df_plot["timestep"], y=df_plot["health_index"], name="Health Index (HI)", line=dict(color="#00cc96", width=2.5, shape='hv')), row=2, col=1)
+            fig_cond.add_trace(
+                go.Scatter(x=df_plot["timestep"], y=df_plot["health_index"],
+                           name="Health Index (HI)", line=dict(color="#00cc96", width=2.5, shape='hv')),
+                row=2, col=1
+            )
             fig_cond.add_hline(y=70, line_dash="dash", line_color="orange", annotation_text="Monitor (70)", row=2, col=1)
             fig_cond.add_hline(y=50, line_dash="dash", line_color="red", annotation_text="Intervention (50)", row=2, col=1)
+
         fig_cond.update_layout(height=500, margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified")
         st.plotly_chart(fig_cond, use_container_width=True)
 
+    # ===== TAB 2: Decision Trace =====
     with t_dec:
         st.subheader(f"🧠 Explainable AI & Decision Attribution for {selected_machine}")
+
         cx1, cx2 = st.columns([1, 1])
         with cx1:
             st.info(f"""
@@ -530,6 +525,7 @@ if st.session_state.sim_result is not None and st.session_state.sim_has_run:
             * **Recommended Action:** `{latest_decision['recommended_action']}`
             * **Consequence of Inaction:** `{latest_decision['consequence_of_inaction']}`
             """)
+
         with cx2:
             attr_dict = latest_decision.get("penalty_contributions", {})
             if attr_dict:
@@ -537,29 +533,39 @@ if st.session_state.sim_result is not None and st.session_state.sim_has_run:
                     "Evidence Modality": list(attr_dict.keys()),
                     "Penalty Contribution (%)": list(attr_dict.values())
                 })
-                st.plotly_chart(px.bar(attr_df, x="Evidence Modality", y="Penalty Contribution (%)",
-                                       color="Evidence Modality", title="HI Penalty Attribution", text_auto=".1f"),
-                                use_container_width=True)
+                st.plotly_chart(
+                    px.bar(attr_df, x="Evidence Modality", y="Penalty Contribution (%)",
+                           color="Evidence Modality", title="HI Penalty Attribution", text_auto=".1f"),
+                    use_container_width=True
+                )
 
+    # ===== TAB 3: Evidence Chain =====
     with t_evidence:
         st.subheader(f"🔗 Complete Evidence Chain for {selected_machine}")
         st.caption("Full causal trace: SENSE → CONTEXT → DETECT → CONFIRM → HEALTH → RUL → DECIDE → ACTION → OUTCOME")
+
         evidence_tracker = getattr(sim_result, 'evidence_tracker', None)
+
         if evidence_tracker and hasattr(evidence_tracker, 'traces'):
             machine_traces = evidence_tracker.get_traces_by_machine(selected_machine)
+
             if machine_traces:
                 latest_trace = machine_traces[-1]
+
                 col_meta1, col_meta2, col_meta3 = st.columns(3)
                 col_meta1.metric("Trace ID", latest_trace.trace_id)
                 col_meta2.metric("Start Time", f"t={latest_trace.start_timestamp} min")
                 col_meta3.metric("Status", latest_trace.final_outcome if latest_trace.final_outcome else "In Progress")
+
                 st.divider()
                 st.write("### 📜 Evidence Chain Timeline")
+
                 step_icons = {
                     "SENSE": "📡", "CONTEXT": "📋", "DETECT": "⚠️",
                     "CONFIRM": "✅", "HEALTH": "💚", "RUL": "⏳",
                     "DECIDE": "🎯", "ACTION": "🔧", "OUTCOME": "📊"
                 }
+
                 for i, step in enumerate(latest_trace.steps):
                     step_type = step.step_type
                     icon = step_icons.get(step_type, "📌")
@@ -571,63 +577,131 @@ if st.session_state.sim_result is not None and st.session_state.sim_has_run:
                         with col_s2:
                             st.write("**Data:**")
                             st.json(step.data)
+
                 st.divider()
+
                 col_exp1, col_exp2 = st.columns(2)
                 with col_exp1:
                     trace_json = json.dumps(latest_trace.to_dict(), indent=2)
-                    st.download_button("📥 Export Trace as JSON", trace_json, f"evidence_trace_{latest_trace.trace_id}.json", "application/json")
+                    st.download_button(
+                        "📥 Export Trace as JSON",
+                        trace_json,
+                        f"evidence_trace_{latest_trace.trace_id}.json",
+                        "application/json"
+                    )
                 with col_exp2:
-                    df_trace = pd.DataFrame([{"Step": s.step_type, "Timestamp": s.timestamp, "Description": s.description, **s.data} for s in latest_trace.steps])
-                    st.download_button("📥 Export Trace as CSV", df_trace.to_csv(index=False).encode('utf-8'), f"evidence_trace_{latest_trace.trace_id}.csv", "text/csv")
+                    df_trace = pd.DataFrame([
+                        {"Step": s.step_type, "Timestamp": s.timestamp, "Description": s.description, **s.data}
+                        for s in latest_trace.steps
+                    ])
+                    st.download_button(
+                        "📥 Export Trace as CSV",
+                        df_trace.to_csv(index=False).encode('utf-8'),
+                        f"evidence_trace_{latest_trace.trace_id}.csv",
+                        "text/csv"
+                    )
             else:
                 st.info(f"No evidence traces found for machine {selected_machine}.")
         else:
             st.warning("Evidence tracker not available.")
 
+    # ===== TAB 4: What-If (Lazy + Cached) =====
     with t_whatif:
         st.subheader("⚖️ Dual-Branch What-If Analysis (Intervention vs No Intervention)")
+
         if st.button("▶️ Run What-If Analysis", key="run_whatif"):
             with st.spinner("Running What-If analysis..."):
-                st.session_state.whatif_result = run_what_if_cached(st.session_state.fault_start, st.session_state.max_deg, config.RANDOM_SEED)
+                st.session_state.whatif_result = run_what_if_cached(
+                    fault_start_val=fault_start,
+                    max_deg_val=max_deg,
+                    seed_val=config.RANDOM_SEED
+                )
                 st.session_state.whatif_cached = True
                 st.rerun()
+
         if st.session_state.whatif_result is not None:
             whatif_res = st.session_state.whatif_result
+
             col_w1, col_w2, col_w3, col_w4 = st.columns(4)
             savings = whatif_res.get("savings", {})
+
             col_w1.metric("⏱️ Downtime Prevented", f"{savings.get('downtime_saved_min', 0.0):.1f} min", delta="Reliability")
             col_w2.metric("💰 Cost Savings", f"${savings.get('cost_saved_usd', 0.0):.2f}", delta="Financial Protection")
             col_w3.metric("📈 OEE Gain", f"+{savings.get('oee_gain_pct', 0.0):.2f}%", delta="Productivity")
             col_w4.metric("🌍 Carbon Avoided", f"{savings.get('carbon_saved_kg', 0.0):.2f} kg CO2", delta="Sustainability")
+
             no_int = whatif_res["no_intervention"]
             pred = whatif_res["predictive"]
+
             wi_df = pd.DataFrame([
-                {"Path": "🔴 No Intervention (Corrective Breakdown)", "Downtime (min)": _get(no_int, "downtime_min"), "OEE (%)": _get(no_int, "oee_pct"), "Good Units": _get(no_int, "good_units"), "Total Cost ($)": _get(no_int, "total_operational_cost_usd"), "Carbon (kg CO2)": _get(no_int, "carbon_kg")},
-                {"Path": "🟢 Predictive Intervention (PRIME Action)", "Downtime (min)": _get(pred, "downtime_min"), "OEE (%)": _get(pred, "oee_pct"), "Good Units": _get(pred, "good_units"), "Total Cost ($)": _get(pred, "total_operational_cost_usd"), "Carbon (kg CO2)": _get(pred, "carbon_kg")}
+                {
+                    "Path": "🔴 No Intervention (Corrective Breakdown)",
+                    "Downtime (min)": _get(no_int, "downtime_min"),
+                    "OEE (%)": _get(no_int, "oee_pct"),
+                    "Good Units": _get(no_int, "good_units"),
+                    "Total Cost ($)": _get(no_int, "total_operational_cost_usd"),
+                    "Carbon (kg CO2)": _get(no_int, "carbon_kg")
+                },
+                {
+                    "Path": "🟢 Predictive Intervention (PRIME Action)",
+                    "Downtime (min)": _get(pred, "downtime_min"),
+                    "OEE (%)": _get(pred, "oee_pct"),
+                    "Good Units": _get(pred, "good_units"),
+                    "Total Cost ($)": _get(pred, "total_operational_cost_usd"),
+                    "Carbon (kg CO2)": _get(pred, "carbon_kg")
+                }
             ])
-            st.dataframe(wi_df.style.highlight_max(subset=["OEE (%)", "Good Units"], color="#d4edda").highlight_min(subset=["Total Cost ($)", "Downtime (min)"], color="#d4edda"), use_container_width=True)
+
+            st.dataframe(
+                wi_df.style.highlight_max(subset=["OEE (%)", "Good Units"], color="#d4edda")
+                       .highlight_min(subset=["Total Cost ($)", "Downtime (min)"], color="#d4edda"),
+                use_container_width=True
+            )
         else:
             st.info("Click the button above to run the What-If analysis.")
 
+    # ===== TAB 5: Resilience =====
     with t_resilience:
         st.subheader("🛡️ Industrial Resilience & Recovery Evaluation")
+
         r_metrics = _get(sim_result, "resilience", None)
         r_col1, r_col2, r_col3, r_col4 = st.columns(4)
+
         r_col1.metric("⏱️ Recovery Duration", f"{_get(r_metrics, 'recovery_time_min', 15.0):.1f} min", delta="Post-repair")
         r_col2.metric("📦 Production Loss", f"{_get(r_metrics, 'production_loss_units', 0)} units", delta="Scrap + downtime")
         rec_ok = _get(r_metrics, 'recovery_success', False)
         r_col3.metric("✅ Recovery Status", "SUCCESS" if rec_ok else "PENDING", delta="Self-stabilized")
-        r_col4.metric("🛡️ Failure Avoided", "✅ Yes" if _get(r_metrics, 'failure_avoided', False) else "❌ No", delta="Predictive benefit")
+        r_col4.metric(
+            "🛡️ Failure Avoided",
+            "✅ Yes" if _get(r_metrics, 'failure_avoided', False) else "❌ No",
+            delta="Predictive benefit"
+        )
 
+    # ===== TAB 6: Events =====
     with t_events:
         st.subheader("📋 Chronological Audit Event Log")
-        events_list = _get(sim_result, "events", [])
-        ev_df = pd.DataFrame([{"Timestep (min)": _get(e, "timestep"), "Severity": _get(e, "severity"), "Machine": _get(e, "machine_id"), "Event Type": _get(e, "event_type"), "Message": _get(e, "message")} for e in events_list])
-        st.dataframe(ev_df, use_container_width=True)
-        st.download_button("📥 Download Audit Trail (CSV)", ev_df.to_csv(index=False).encode('utf-8'), "prime_factory_events.csv", "text/csv")
 
+        events_list = _get(sim_result, "events", [])
+        ev_df = pd.DataFrame([{
+            "Timestep (min)": _get(e, "timestep"),
+            "Severity": _get(e, "severity"),
+            "Machine": _get(e, "machine_id"),
+            "Event Type": _get(e, "event_type"),
+            "Message": _get(e, "message")
+        } for e in events_list])
+
+        st.dataframe(ev_df, use_container_width=True)
+        st.download_button(
+            "📥 Download Audit Trail (CSV)",
+            ev_df.to_csv(index=False).encode('utf-8'),
+            "prime_factory_events.csv",
+            "text/csv"
+        )
+
+    # ===== TAB 7: Benchmark (Lazy) =====
     with t_bench:
         st.subheader("📊 Scientific Factory Policy Benchmark")
+
         if st.button("▶️ Run Scientific Benchmark", key="run_benchmark"):
             with st.spinner("Running benchmark simulations..."):
                 pols = [("CORRECTIVE", False), ("PREVENTIVE", False), ("PREDICTIVE", False), ("PREDICTIVE", True)]
@@ -655,13 +729,20 @@ if st.session_state.sim_result is not None and st.session_state.sim_has_run:
                     })
                 st.session_state.benchmark_result = pd.DataFrame(b_res)
                 st.rerun()
+
         if st.session_state.benchmark_result is not None:
-            st.dataframe(st.session_state.benchmark_result.style.highlight_max(subset=["OEE (%)", "Good Units"], color="#d4edda").highlight_min(subset=["Total Cost ($)", "Peak (kW)"], color="#d4edda"), use_container_width=True)
+            st.dataframe(
+                st.session_state.benchmark_result.style.highlight_max(subset=["OEE (%)", "Good Units"], color="#d4edda")
+                                   .highlight_min(subset=["Total Cost ($)", "Peak (kW)"], color="#d4edda"),
+                use_container_width=True
+            )
         else:
             st.info("Click the button above to run the benchmark.")
 
+    # ===== TAB 8: Ablation (Lazy) =====
     with t_ablation:
         st.subheader("🧪 Calibrated Pure Detector Ablation Study (Layers A–E)")
+
         if st.button("▶️ Run Ablation Study", key="run_ablation"):
             with st.spinner("Running ablation study..."):
                 try:
@@ -670,16 +751,28 @@ if st.session_state.sim_result is not None and st.session_state.sim_has_run:
                 except Exception as e:
                     st.warning(f"Ablation study failed: {e}")
                 st.rerun()
+
         if st.session_state.ablation_result is not None:
             ab_df = st.session_state.ablation_result
-            st.dataframe(ab_df.style.highlight_max(subset=["Precision", "Recall", "F1-Score"], color="#d4edda").highlight_min(subset=["False Alarms/Hr"], color="#d4edda"), use_container_width=True)
-            st.plotly_chart(px.bar(ab_df, x="Architecture Layer", y="F1-Score", color="Architecture Layer", title="F1-Score Across Detector Layers", text_auto=".3f"), use_container_width=True)
+            st.dataframe(
+                ab_df.style.highlight_max(subset=["Precision", "Recall", "F1-Score"], color="#d4edda")
+                      .highlight_min(subset=["False Alarms/Hr"], color="#d4edda"),
+                use_container_width=True
+            )
+            st.plotly_chart(
+                px.bar(ab_df, x="Architecture Layer", y="F1-Score",
+                       color="Architecture Layer", title="F1-Score Across Detector Layers", text_auto=".3f"),
+                use_container_width=True
+            )
         else:
             st.info("Click the button above to run the ablation study.")
 
+    # ===== TAB 9: Report =====
     with t_report:
         st.subheader("📑 Auto-Generated Experiment Report")
+
         rep1, rep2 = st.columns(2)
+
         with rep1:
             st.write("#### Experiment Metadata")
             st.json({
@@ -692,16 +785,19 @@ if st.session_state.sim_result is not None and st.session_state.sim_has_run:
                 "Policy": scenario_base.policy_type,
                 "Version": "PRIME-Factory v6.2"
             })
+
         with rep2:
             maint_cost = 0.0
             if hasattr(sim_result, 'maintenance_cost_usd'):
                 maint_cost = sim_result.maintenance_cost_usd
+                
             fail_avoided = False
             if hasattr(sim_result, 'resilience') and sim_result.resilience:
                 if hasattr(sim_result.resilience, 'failure_avoided'):
                     fail_avoided = sim_result.resilience.failure_avoided
                 elif isinstance(sim_result.resilience, dict):
                     fail_avoided = sim_result.resilience.get('failure_avoided', False)
+            
             st.write("#### Quantified Outcomes")
             st.json({
                 "OEE": f"{_get(sim_result, 'oee_pct'):.1f}%",
@@ -723,18 +819,3 @@ if st.session_state.sim_result is not None and st.session_state.sim_has_run:
     # ============================================================
     st.divider()
     st.caption("🏭 PRIME-Factory v6.2 | Team MSA | RoboDam 2026")
-else:
-    # ===== If no simulation has been run, show prompt =====
-    st.info("👆 Click the **'▶️ Run Simulation'** button in the sidebar to start the PRIME-Factory simulation and view the results.")
-    st.markdown("""
-    ### 🏭 PRIME-Factory v6.2
-
-    **Ready to explore the smart factory decision-support system.**
-
-    - **Judge Mode**: Use the sidebar to navigate through the 3-minute demo flow.
-    - **Manual Mode**: Configure your own fault scenario and run the simulation.
-    - **After running**: Explore the tabs for live telemetry, decision traces, evidence chains, and more.
-
-    ---
-    **Click 'Run Simulation' to get started!** 🚀
-    """)
