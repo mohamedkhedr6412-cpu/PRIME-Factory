@@ -77,9 +77,6 @@ if "whatif_cached" not in st.session_state:
     st.session_state.whatif_cached = False
 if "pdm_triggered_in_step3" not in st.session_state:
     st.session_state.pdm_triggered_in_step3 = False
-# ===== NEW: Track if Step 1 has been initialized =====
-if "step1_initialized" not in st.session_state:
-    st.session_state.step1_initialized = False
 
 
 st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v6.2")
@@ -107,7 +104,6 @@ with col_j1:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = False
-        st.session_state.step1_initialized = False  # <--- NEW
         st.rerun()
 with col_j2:
     if st.button("⏮️ Reset Pitch", use_container_width=True):
@@ -122,21 +118,20 @@ with col_j2:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = False
-        st.session_state.step1_initialized = False  # <--- NEW
         st.rerun()
 
 # ---- Judge Step Display ----
 j_step = st.session_state.judge_mode_step
 
-# ===== FIXED: Step 1 with cache reset ONLY on first entry =====
+# ===== FIXED: Step 1 with complete reset =====
 if j_step == 1:
     st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
-    # Only reset cache if we haven't initialized Step 1 yet
-    if not st.session_state.step1_initialized:
-        st.session_state.force_pdm_now = False
-        st.session_state.pdm_triggered_in_step3 = False
-        st.session_state.scenario_hash = None  # Force cache reset
-        st.session_state.step1_initialized = True
+    # ===== FORCE COMPLETE RESET =====
+    st.session_state.force_pdm_now = False
+    st.session_state.pdm_triggered_in_step3 = False
+    st.session_state.sim_result = None          # Clear old simulation result
+    st.session_state.sim_running = True         # Force new simulation
+    st.session_state.scenario_hash = f"step1_{time.time()}"  # Unique hash to avoid cache
     sim_mode = "Multi-Product Switching (A → B → C)"
     selected_product = "Product_B"
     fault_type = "None (Healthy Baseline)"
@@ -203,8 +198,6 @@ else:
     apply_dr = st.sidebar.checkbox("Enable Peak Shaving", value=False)
     st.session_state.pdm_triggered_in_step3 = False
     st.session_state.force_pdm_now = False
-    # Reset step1_initialized when entering manual mode
-    st.session_state.step1_initialized = False
 
 # ---- Machine Selection ----
 selected_machine = st.sidebar.selectbox(
@@ -228,7 +221,6 @@ with col_btn1:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = True
-        st.session_state.step1_initialized = False
         st.rerun()
 with col_btn2:
     if st.button("🔄 Reset Line", use_container_width=True):
@@ -243,7 +235,6 @@ with col_btn2:
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
         st.session_state.pdm_triggered_in_step3 = False
-        st.session_state.step1_initialized = False
         st.rerun()
 
 # ---- Playback ----
