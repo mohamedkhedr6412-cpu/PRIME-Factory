@@ -78,6 +78,22 @@ if "whatif_cached" not in st.session_state:
 if "pdm_triggered_in_step3" not in st.session_state:
     st.session_state.pdm_triggered_in_step3 = False
 
+# ===== FIXED: Store scenario parameters in session_state =====
+if "sim_mode" not in st.session_state:
+    st.session_state.sim_mode = "Multi-Product Switching (A → B → C)"
+if "selected_product" not in st.session_state:
+    st.session_state.selected_product = "Product_B"
+if "fault_type" not in st.session_state:
+    st.session_state.fault_type = "None (Healthy Baseline)"
+if "fault_start" not in st.session_state:
+    st.session_state.fault_start = 120
+if "max_deg" not in st.session_state:
+    st.session_state.max_deg = 0.0
+if "enable_chaos" not in st.session_state:
+    st.session_state.enable_chaos = False
+if "apply_dr" not in st.session_state:
+    st.session_state.apply_dr = False
+
 
 st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v6.2")
 st.caption("National Competition for AI and Robotics (RoboDam 2026) | Team MSA")
@@ -94,7 +110,6 @@ col_j1, col_j2 = st.sidebar.columns(2)
 with col_j1:
     if st.button("▶️ Next Demo Step", type="primary", use_container_width=True):
         st.session_state.judge_mode_step = (st.session_state.judge_mode_step + 1) % 4
-        st.session_state.manual_pdm_timestep = None
         st.session_state.sim_result = None
         st.session_state.scenario_hash = None
         st.session_state.whatif_result = None
@@ -108,7 +123,6 @@ with col_j1:
 with col_j2:
     if st.button("⏮️ Reset Pitch", use_container_width=True):
         st.session_state.judge_mode_step = 0
-        st.session_state.manual_pdm_timestep = None
         st.session_state.sim_result = None
         st.session_state.scenario_hash = None
         st.session_state.whatif_result = None
@@ -120,78 +134,80 @@ with col_j2:
         st.session_state.pdm_triggered_in_step3 = False
         st.rerun()
 
-# ---- Judge Step Display ----
-j_step = st.session_state.judge_mode_step
-
-# ===== FIXED: Always define all variables =====
-if j_step == 1:
-    st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
-    st.session_state.force_pdm_now = False
-    st.session_state.pdm_triggered_in_step3 = False
-    st.session_state.scenario_hash = None  # Force reset
-    sim_mode = "Multi-Product Switching (A → B → C)"
-    selected_product = "Product_B"
-    fault_type = "None (Healthy Baseline)"
-    fault_start = 120
-    max_deg = 0.0
-    enable_chaos = False
-    apply_dr = False
-elif j_step == 2:
-    st.sidebar.warning("📌 **Step 2 (0:20-1:35):** M3 Bearing Wear Onset & XAI Decision Trace.")
-    st.session_state.force_pdm_now = False
-    st.session_state.pdm_triggered_in_step3 = False
-    sim_mode = "Fixed Product Regime"
-    selected_product = "Product_B"
-    fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
-    fault_start = 120
-    max_deg = 0.55  # FIXED: Reduced for early detection
-    enable_chaos = False
-    apply_dr = False
-elif j_step == 3:
-    st.sidebar.success("📌 **Step 3 (1:35-3:00):** Causal PdM Intervention, Recovery & What-If ROI.")
-    sim_mode = "Fixed Product Regime"
-    selected_product = "Product_B"
-    fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
-    fault_start = 120
-    max_deg = 0.85
-    enable_chaos = False
-    apply_dr = False
-    if not st.session_state.get("pdm_triggered_in_step3", False):
-        st.session_state.force_pdm_now = True
-        st.session_state.pdm_triggered_in_step3 = True
-        st.rerun()
-else:
-    # Manual mode
-    st.sidebar.subheader("⚙️ Manual Configuration")
-    sim_mode = st.sidebar.radio(
-        "Operating Schedule:",
-        ["Fixed Product Regime", "Multi-Product Switching (A → B → C)"],
-        index=0
-    )
-    if sim_mode == "Fixed Product Regime":
-        selected_product = st.sidebar.selectbox(
-            "Active Product:",
-            ["Product_A", "Product_B", "Product_C"],
+# ---- Update scenario parameters based on judge_mode_step ----
+def update_scenario_params(step):
+    """Set scenario parameters based on the current step."""
+    if step == 1:
+        st.session_state.sim_mode = "Multi-Product Switching (A → B → C)"
+        st.session_state.selected_product = "Product_B"
+        st.session_state.fault_type = "None (Healthy Baseline)"
+        st.session_state.fault_start = 120
+        st.session_state.max_deg = 0.0
+        st.session_state.enable_chaos = False
+        st.session_state.apply_dr = False
+        st.session_state.force_pdm_now = False
+        st.session_state.pdm_triggered_in_step3 = False
+        st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
+    elif step == 2:
+        st.session_state.sim_mode = "Fixed Product Regime"
+        st.session_state.selected_product = "Product_B"
+        st.session_state.fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
+        st.session_state.fault_start = 120
+        st.session_state.max_deg = 0.55
+        st.session_state.enable_chaos = False
+        st.session_state.apply_dr = False
+        st.session_state.force_pdm_now = False
+        st.session_state.pdm_triggered_in_step3 = False
+        st.sidebar.warning("📌 **Step 2 (0:20-1:35):** M3 Bearing Wear Onset & XAI Decision Trace.")
+    elif step == 3:
+        st.session_state.sim_mode = "Fixed Product Regime"
+        st.session_state.selected_product = "Product_B"
+        st.session_state.fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
+        st.session_state.fault_start = 120
+        st.session_state.max_deg = 0.85
+        st.session_state.enable_chaos = False
+        st.session_state.apply_dr = False
+        st.sidebar.success("📌 **Step 3 (1:35-3:00):** Causal PdM Intervention, Recovery & What-If ROI.")
+        if not st.session_state.get("pdm_triggered_in_step3", False):
+            st.session_state.force_pdm_now = True
+            st.session_state.pdm_triggered_in_step3 = True
+            st.rerun()
+    else:
+        # Manual mode
+        st.sidebar.subheader("⚙️ Manual Configuration")
+        st.session_state.sim_mode = st.sidebar.radio(
+            "Operating Schedule:",
+            ["Fixed Product Regime", "Multi-Product Switching (A → B → C)"],
+            index=0
+        )
+        if st.session_state.sim_mode == "Fixed Product Regime":
+            st.session_state.selected_product = st.sidebar.selectbox(
+                "Active Product:",
+                ["Product_A", "Product_B", "Product_C"],
+                index=1
+            )
+        else:
+            st.session_state.selected_product = "Product_B"
+        st.session_state.fault_type = st.sidebar.selectbox(
+            "Fault Type:",
+            [
+                "None (Healthy Baseline)",
+                "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)",
+                "Mechanical Friction (Power Surge ↑ + High ECI)",
+                "Electrical Anomaly (Current Distortion + PF Drop)"
+            ],
             index=1
         )
-    else:
-        selected_product = "Product_B"
-    fault_type = st.sidebar.selectbox(
-        "Fault Type:",
-        [
-            "None (Healthy Baseline)",
-            "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)",
-            "Mechanical Friction (Power Surge ↑ + High ECI)",
-            "Electrical Anomaly (Current Distortion + PF Drop)"
-        ],
-        index=1
-    )
-    fault_start = st.sidebar.slider("Fault Start (min):", 10, 400, 120)
-    max_deg = st.sidebar.slider("Severity (%):", 10, 85, 75) / 100.0
-    enable_chaos = st.sidebar.checkbox("Chaos Stress-Test (Sensor Noise)", value=False)
-    apply_dr = st.sidebar.checkbox("Enable Peak Shaving", value=False)
-    st.session_state.pdm_triggered_in_step3 = False
-    st.session_state.force_pdm_now = False
+        st.session_state.fault_start = st.sidebar.slider("Fault Start (min):", 10, 400, 120)
+        st.session_state.max_deg = st.sidebar.slider("Severity (%):", 10, 85, 75) / 100.0
+        st.session_state.enable_chaos = st.sidebar.checkbox("Chaos Stress-Test (Sensor Noise)", value=False)
+        st.session_state.apply_dr = st.sidebar.checkbox("Enable Peak Shaving", value=False)
+        st.session_state.pdm_triggered_in_step3 = False
+        st.session_state.force_pdm_now = False
+
+# ---- Update scenario parameters based on current step ----
+j_step = st.session_state.judge_mode_step
+update_scenario_params(j_step)
 
 # ---- Machine Selection ----
 selected_machine = st.sidebar.selectbox(
@@ -245,43 +261,43 @@ time_scrubber = st.sidebar.slider(
 # ============================================================
 
 # Build schedule
-if sim_mode == "Fixed Product Regime":
-    schedule = [selected_product] * config.TOTAL_TIMESTEPS
+if st.session_state.sim_mode == "Fixed Product Regime":
+    schedule = [st.session_state.selected_product] * config.TOTAL_TIMESTEPS
 else:
     from simulation.faults import generate_switching_schedule
     schedule = generate_switching_schedule(config.TOTAL_TIMESTEPS)
 
-def compute_scenario_hash(scenario):
-    """Compute a deterministic hash for the scenario, excluding force_pdm_now."""
+def compute_scenario_hash():
+    """Compute a deterministic hash for the current scenario."""
     hash_input = (
-        scenario.fault_machine,
-        scenario.fault_type,
-        scenario.fault_start,
-        scenario.max_degradation,
-        scenario.policy_type,
-        scenario.enable_peak_shaving,
-        scenario.enable_chaos,
-        tuple(scenario.product_schedule),
+        selected_machine,
+        st.session_state.fault_type,
+        st.session_state.fault_start,
+        st.session_state.max_deg,
+        "PREDICTIVE",
+        st.session_state.apply_dr,
+        st.session_state.enable_chaos,
+        tuple(schedule),
     )
     return hashlib.md5(str(hash_input).encode()).hexdigest()
 
-# Build scenario (without force_pdm_now for hashing)
+# Build scenario
 scenario_base = ScenarioConfig(
     scenario_id="LIVE_DASHBOARD_RUN",
     seed=config.RANDOM_SEED,
     product_schedule=schedule,
     fault_machine=selected_machine,
-    fault_type=fault_type,
-    fault_start=fault_start,
-    max_degradation=max_deg if fault_type != "None (Healthy Baseline)" else 0.0,
-    enable_chaos=enable_chaos,
-    enable_peak_shaving=apply_dr,
+    fault_type=st.session_state.fault_type,
+    fault_start=st.session_state.fault_start,
+    max_degradation=st.session_state.max_deg if st.session_state.fault_type != "None (Healthy Baseline)" else 0.0,
+    enable_chaos=st.session_state.enable_chaos,
+    enable_peak_shaving=st.session_state.apply_dr,
     manual_pdm_timestep=None,
     policy_type="PREDICTIVE",
     force_pdm_now=False
 )
 
-current_hash = compute_scenario_hash(scenario_base)
+current_hash = compute_scenario_hash()
 
 # ---- Check if results are cached ----
 if st.session_state.scenario_hash != current_hash:
@@ -402,7 +418,7 @@ if st.session_state.sim_result is not None:
         st.metric(
             "📈 Peak Demand",
             f"{_get(sim_result, 'peak_demand_kw'):.1f} kW",
-            delta="Peak Shaving" if apply_dr else "Standard"
+            delta="Peak Shaving" if st.session_state.apply_dr else "Standard"
         )
     with kpi3:
         st.metric(
@@ -607,8 +623,8 @@ if st.session_state.sim_result is not None:
         if st.button("▶️ Run What-If Analysis", key="run_whatif"):
             with st.spinner("Running What-If analysis..."):
                 st.session_state.whatif_result = run_what_if_cached(
-                    fault_start_val=fault_start,
-                    max_deg_val=max_deg,
+                    fault_start_val=st.session_state.fault_start,
+                    max_deg_val=st.session_state.max_deg,
                     seed_val=config.RANDOM_SEED
                 )
                 st.session_state.whatif_cached = True
