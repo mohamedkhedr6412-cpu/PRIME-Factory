@@ -75,7 +75,6 @@ if "ablation_result" not in st.session_state:
     st.session_state.ablation_result = None
 if "whatif_cached" not in st.session_state:
     st.session_state.whatif_cached = False
-# ===== NEW: Track if PdM has been triggered in Step 3 =====
 if "pdm_triggered_in_step3" not in st.session_state:
     st.session_state.pdm_triggered_in_step3 = False
 
@@ -104,7 +103,6 @@ with col_j1:
         st.session_state.benchmark_result = None
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
-        # ===== NEW: Reset PdM trigger flag =====
         st.session_state.pdm_triggered_in_step3 = False
         st.rerun()
 with col_j2:
@@ -119,7 +117,6 @@ with col_j2:
         st.session_state.benchmark_result = None
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
-        # ===== NEW: Reset PdM trigger flag =====
         st.session_state.pdm_triggered_in_step3 = False
         st.rerun()
 
@@ -128,6 +125,9 @@ j_step = st.session_state.judge_mode_step
 
 if j_step == 1:
     st.sidebar.info("📌 **Step 1 (0:00-0:20):** Healthy Multi-Product Baseline (A→B→C).")
+    # ===== FIXED: Force reset force_pdm_now and pdm_triggered_in_step3 =====
+    st.session_state.force_pdm_now = False
+    st.session_state.pdm_triggered_in_step3 = False
     sim_mode = "Multi-Product Switching (A → B → C)"
     selected_product = "Product_B"
     fault_type = "None (Healthy Baseline)"
@@ -135,10 +135,11 @@ if j_step == 1:
     max_deg = 0.0
     enable_chaos = False
     apply_dr = False
-    # ===== NEW: Reset PdM trigger flag when entering Step 1 =====
-    st.session_state.pdm_triggered_in_step3 = False
 elif j_step == 2:
     st.sidebar.warning("📌 **Step 2 (0:20-1:35):** M3 Bearing Wear Onset & XAI Decision Trace.")
+    # ===== FIXED: Force reset force_pdm_now and pdm_triggered_in_step3 =====
+    st.session_state.force_pdm_now = False
+    st.session_state.pdm_triggered_in_step3 = False
     sim_mode = "Fixed Product Regime"
     selected_product = "Product_B"
     fault_type = "Bearing Wear (Vibration ↑ + Temp ↑ + ECI ↑)"
@@ -146,8 +147,6 @@ elif j_step == 2:
     max_deg = 0.85
     enable_chaos = False
     apply_dr = False
-    # ===== NEW: Reset PdM trigger flag when entering Step 2 =====
-    st.session_state.pdm_triggered_in_step3 = False
 elif j_step == 3:
     st.sidebar.success("📌 **Step 3 (1:35-3:00):** Causal PdM Intervention, Recovery & What-If ROI.")
     sim_mode = "Fixed Product Regime"
@@ -161,7 +160,6 @@ elif j_step == 3:
     if not st.session_state.get("pdm_triggered_in_step3", False):
         st.session_state.force_pdm_now = True
         st.session_state.pdm_triggered_in_step3 = True
-        # Force a rerun to execute the simulation with force_pdm_now=True
         st.rerun()
 else:
     # Manual mode
@@ -191,8 +189,9 @@ else:
     max_deg = st.sidebar.slider("Severity (%):", 10, 85, 75) / 100.0
     enable_chaos = st.sidebar.checkbox("Chaos Stress-Test (Sensor Noise)", value=False)
     apply_dr = st.sidebar.checkbox("Enable Peak Shaving", value=False)
-    # ===== NEW: Reset PdM trigger flag when entering manual mode =====
+    # ===== FIXED: Reset PdM trigger flag when entering manual mode =====
     st.session_state.pdm_triggered_in_step3 = False
+    st.session_state.force_pdm_now = False
 
 # ---- Machine Selection ----
 selected_machine = st.sidebar.selectbox(
@@ -215,7 +214,7 @@ with col_btn1:
         st.session_state.benchmark_result = None
         st.session_state.ablation_result = None
         st.session_state.whatif_cached = False
-        st.session_state.pdm_triggered_in_step3 = True  # Mark as triggered manually
+        st.session_state.pdm_triggered_in_step3 = True
         st.rerun()
 with col_btn2:
     if st.button("🔄 Reset Line", use_container_width=True):
@@ -252,7 +251,6 @@ else:
     from simulation.faults import generate_switching_schedule
     schedule = generate_switching_schedule(config.TOTAL_TIMESTEPS)
 
-# ---- Improved Hashing: include full schedule, fault_type, enable_chaos ----
 def compute_scenario_hash(scenario):
     """Compute a deterministic hash for the scenario, excluding force_pdm_now."""
     hash_input = (
@@ -280,7 +278,7 @@ scenario_base = ScenarioConfig(
     enable_peak_shaving=apply_dr,
     manual_pdm_timestep=None,
     policy_type="PREDICTIVE",
-    force_pdm_now=False  # Will be set separately
+    force_pdm_now=False
 )
 
 current_hash = compute_scenario_hash(scenario_base)
@@ -299,11 +297,6 @@ if st.session_state.scenario_hash != current_hash:
 # ===== Cached simulation function =====
 @st.cache_data(ttl=3600, show_spinner=False)
 def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
-    """
-    Run the simulation with caching based on scenario hash and force_pdm flag.
-    scenario_dict contains all scenario parameters.
-    """
-    # Reconstruct ScenarioConfig from dict
     scenario = ScenarioConfig(
         scenario_id=scenario_dict["scenario_id"],
         seed=scenario_dict["seed"],
@@ -324,7 +317,6 @@ def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
 # ===== Cached What-If function =====
 @st.cache_data(ttl=3600, show_spinner=False)
 def run_what_if_cached(fault_start_val, max_deg_val, seed_val):
-    """Cached What-If analysis for the same inputs."""
     return FactoryPolicySimulator.run_what_if_analysis(
         product_schedule=["Product_B"] * config.TOTAL_TIMESTEPS,
         fault_start_t=fault_start_val,
@@ -335,9 +327,7 @@ def run_what_if_cached(fault_start_val, max_deg_val, seed_val):
 
 # ===== DISPLAY SIMULATION STATUS =====
 if st.session_state.sim_running:
-    # ===== FIXED: Replace fake progress bar with real spinner =====
     with st.spinner("🔄 Running PRIME-Factory simulation... This may take 30-60 seconds."):
-        # Prepare scenario dict for caching
         scenario_dict = {
             "scenario_id": scenario_base.scenario_id,
             "seed": scenario_base.seed,
@@ -353,7 +343,6 @@ if st.session_state.sim_running:
         }
         force_pdm = st.session_state.get('force_pdm_now', False)
         st.session_state.sim_result = run_cached_simulation(current_hash, scenario_dict, force_pdm)
-        # ===== FIXED: Reset force_pdm_now without extra rerun =====
         st.session_state.force_pdm_now = False
         st.session_state.sim_running = False
         st.rerun()
