@@ -2,7 +2,7 @@
 PRIME-Factory Interactive Industrial Control & Decision Center v6.2 (Ultra-Fast)
 Features: Multi-Product Contexts, Physical Telemetry, XAI Decision Trace, Deterministic What-If,
 Causal PdM Execution Lifecycle, Industrial Resilience, and 3-Minute Judge Mode Wizard.
-Now with explicit force_pdm_now for interactive control and lazy-loaded heavy computations.
+Now with explicit force_pdm_now for interactive control and manual session-state caching.
 """
 
 import sys
@@ -77,6 +77,9 @@ if "whatif_cached" not in st.session_state:
     st.session_state.whatif_cached = False
 if "pdm_triggered_in_step3" not in st.session_state:
     st.session_state.pdm_triggered_in_step3 = False
+# ===== NEW: Manual cache for simulation results =====
+if "sim_cache" not in st.session_state:
+    st.session_state.sim_cache = {}
 
 
 st.title("🏭 PRIME-Factory: Industrial Control & Decision Center v6.2")
@@ -259,7 +262,7 @@ else:
 def compute_scenario_hash(scenario):
     """Compute a deterministic hash for the scenario, including scenario_id."""
     hash_input = (
-        scenario.scenario_id,  # <--- ADDED: scenario_id is now part of hash
+        scenario.scenario_id,
         scenario.fault_machine,
         scenario.fault_type,
         scenario.fault_start,
@@ -300,9 +303,16 @@ if st.session_state.scenario_hash != current_hash:
     st.session_state.sim_running = True
     st.session_state.whatif_cached = False
 
-# ===== Cached simulation function =====
-@st.cache_data(ttl=3600, show_spinner=False)
-def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
+# ===== FIXED: Manual caching using session_state (no @st.cache_data) =====
+def run_simulation_with_cache(scenario_dict, force_pdm):
+    """Run simulation and cache result in session_state using a unique key."""
+    cache_key = f"{scenario_dict['scenario_id']}_{hashlib.md5(str(scenario_dict).encode()).hexdigest()}_{force_pdm}"
+    
+    if cache_key in st.session_state.sim_cache:
+        # Return cached result
+        return st.session_state.sim_cache[cache_key]
+    
+    # Build scenario from dict
     scenario = ScenarioConfig(
         scenario_id=scenario_dict["scenario_id"],
         seed=scenario_dict["seed"],
@@ -318,17 +328,9 @@ def run_cached_simulation(scenario_hash, scenario_dict, force_pdm):
         force_pdm_now=force_pdm
     )
     result = UnifiedSimulationEngine.run(scenario)
+    # Store in cache
+    st.session_state.sim_cache[cache_key] = result
     return result
-
-# ===== Cached What-If function =====
-@st.cache_data(ttl=3600, show_spinner=False)
-def run_what_if_cached(fault_start_val, max_deg_val, seed_val):
-    return FactoryPolicySimulator.run_what_if_analysis(
-        product_schedule=["Product_B"] * config.TOTAL_TIMESTEPS,
-        fault_start_t=fault_start_val,
-        max_deg=max_deg_val,
-        seed=seed_val
-    )
 
 
 # ===== DISPLAY SIMULATION STATUS =====
@@ -348,7 +350,7 @@ if st.session_state.sim_running:
             "policy_type": scenario_base.policy_type,
         }
         force_pdm = st.session_state.get('force_pdm_now', False)
-        st.session_state.sim_result = run_cached_simulation(current_hash, scenario_dict, force_pdm)
+        st.session_state.sim_result = run_simulation_with_cache(scenario_dict, force_pdm)
         st.session_state.force_pdm_now = False
         st.session_state.sim_running = False
         st.rerun()
