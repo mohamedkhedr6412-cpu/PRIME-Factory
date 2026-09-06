@@ -332,6 +332,16 @@ def run_simulation_with_cache(scenario_dict, force_pdm):
     st.session_state.sim_cache[cache_key] = result
     return result
 
+# ===== Cached What-If function (kept for lazy loading) =====
+@st.cache_data(ttl=3600, show_spinner=False)
+def run_what_if_cached(fault_start_val, max_deg_val, seed_val):
+    return FactoryPolicySimulator.run_what_if_analysis(
+        product_schedule=["Product_B"] * config.TOTAL_TIMESTEPS,
+        fault_start_t=fault_start_val,
+        max_deg=max_deg_val,
+        seed=seed_val
+    )
+
 
 # ===== DISPLAY SIMULATION STATUS =====
 if st.session_state.sim_running:
