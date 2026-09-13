@@ -3,6 +3,8 @@ PRIME-Factory Interactive Industrial Control & Decision Center v6.2 (Ultra-Fast)
 Features: Multi-Product Contexts, Physical Telemetry, XAI Decision Trace, Deterministic What-If,
 Causal PdM Execution Lifecycle, Industrial Resilience, and 3-Minute Judge Mode Wizard.
 Now with explicit force_pdm_now for interactive control and robust manual caching.
+FIXED: What-If analysis now computes fresh results every time (no stale cache).
+FIXED: What-If uses BENCHMARK_CONFIG parameters for consistency with main.py.
 """
 
 import sys
@@ -331,14 +333,17 @@ def run_simulation_with_cache(scenario_dict, force_pdm):
     st.session_state.sim_cache[cache_key] = result
     return result
 
-# ===== Cached What-If function =====
-@st.cache_data(ttl=3600, show_spinner=False)
-def run_what_if_cached(fault_start_val, max_deg_val, seed_val):
-    return FactoryPolicySimulator.run_what_if_analysis(
+# ===== FIXED: What-If function WITHOUT caching (fresh computation every time) =====
+def run_what_if_uncached():
+    """
+    Run What-If analysis fresh every time — NO caching.
+    Uses BENCHMARK_CONFIG parameters for consistency with main.py.
+    """
+    return FactoryPolicySimulator.run_counterfactual_benchmark(
         product_schedule=["Product_B"] * config.TOTAL_TIMESTEPS,
-        fault_start_t=fault_start_val,
-        max_deg=max_deg_val,
-        seed=seed_val
+        fault_start_t=config.BENCHMARK_CONFIG.get("fault_start", 100),
+        max_deg=config.BENCHMARK_CONFIG.get("max_degradation", 0.95),
+        seed=config.RANDOM_SEED
     )
 
 
@@ -358,7 +363,6 @@ if st.session_state.sim_running:
             "manual_pdm_timestep": scenario_base.manual_pdm_timestep,
             "policy_type": scenario_base.policy_type,
         }
-        # ===== FIXED: Force force_pdm=False for Step 1 =====
         if j_step == 1:
             force_pdm = False
         else:
@@ -623,18 +627,15 @@ if st.session_state.sim_result is not None:
         else:
             st.warning("Evidence tracker not available.")
 
-    # ===== TAB 4: What-If (Lazy + Cached) =====
+    # ===== TAB 4: What-If (No Cache — Fresh Computation) =====
     with t_whatif:
         st.subheader("⚖️ Dual-Branch What-If Analysis (Intervention vs No Intervention)")
+        st.caption("Compares a Corrective baseline vs an AI-driven Predictive policy under the same fault conditions (fault start = 100 min, max degradation = 95%).")
 
         if st.button("▶️ Run What-If Analysis", key="run_whatif"):
-            with st.spinner("Running What-If analysis..."):
-                # ===== FIXED: Use fixed max_deg=0.95 for meaningful comparison =====
-                st.session_state.whatif_result = run_what_if_cached(
-                    fault_start_val=fault_start,
-                    max_deg_val=0.95,
-                    seed_val=config.RANDOM_SEED
-                )
+            with st.spinner("Running What-If analysis (this takes ~30-60 seconds)..."):
+                # ===== FIXED: Fresh computation, no cache =====
+                st.session_state.whatif_result = run_what_if_uncached()
                 st.session_state.whatif_cached = True
                 st.rerun()
 
@@ -688,7 +689,7 @@ if st.session_state.sim_result is not None:
                     use_container_width=True
                 )
         else:
-            st.info("Click the button above to run the What-If analysis.")
+            st.info("Click the button above to run the What-If analysis. This may take 30-60 seconds.")
 
     # ===== TAB 5: Resilience =====
     with t_resilience:
