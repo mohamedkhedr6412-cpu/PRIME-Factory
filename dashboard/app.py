@@ -629,9 +629,10 @@ if st.session_state.sim_result is not None:
 
         if st.button("▶️ Run What-If Analysis", key="run_whatif"):
             with st.spinner("Running What-If analysis..."):
+                # ===== FIXED: Use fixed max_deg=0.95 for meaningful comparison =====
                 st.session_state.whatif_result = run_what_if_cached(
                     fault_start_val=fault_start,
-                    max_deg_val=max_deg,
+                    max_deg_val=0.95,
                     seed_val=config.RANDOM_SEED
                 )
                 st.session_state.whatif_cached = True
@@ -643,38 +644,49 @@ if st.session_state.sim_result is not None:
             col_w1, col_w2, col_w3, col_w4 = st.columns(4)
             savings = whatif_res.get("savings", {})
 
-            col_w1.metric("⏱️ Downtime Prevented", f"{savings.get('downtime_saved_min', 0.0):.1f} min", delta="Reliability")
-            col_w2.metric("💰 Cost Savings", f"${savings.get('cost_saved_usd', 0.0):.2f}", delta="Financial Protection")
-            col_w3.metric("📈 OEE Gain", f"+{savings.get('oee_gain_pct', 0.0):.2f}%", delta="Productivity")
-            col_w4.metric("🌍 Carbon Avoided", f"{savings.get('carbon_saved_kg', 0.0):.2f} kg CO2", delta="Sustainability")
+            # ===== FIXED: Get corrective result with fallback =====
+            no_int = whatif_res.get("corrective") or whatif_res.get("no_intervention")
+            pred = whatif_res.get("predictive")
 
-            no_int = whatif_res["no_intervention"]
-            pred = whatif_res["predictive"]
+            if no_int is None or pred is None:
+                st.error("What-If analysis failed to produce valid results. Please try again.")
+            else:
+                # ===== FIXED: Calculate carbon_saved if missing =====
+                carbon_saved = savings.get("carbon_saved_kg", 0.0)
+                if carbon_saved == 0.0:
+                    carbon_corr = _get(no_int, "carbon_kg", 0.0)
+                    carbon_pred = _get(pred, "carbon_kg", 0.0)
+                    carbon_saved = max(0, carbon_corr - carbon_pred)
 
-            wi_df = pd.DataFrame([
-                {
-                    "Path": "🔴 No Intervention (Corrective Breakdown)",
-                    "Downtime (min)": _get(no_int, "downtime_min"),
-                    "OEE (%)": _get(no_int, "oee_pct"),
-                    "Good Units": _get(no_int, "good_units"),
-                    "Total Cost ($)": _get(no_int, "total_operational_cost_usd"),
-                    "Carbon (kg CO2)": _get(no_int, "carbon_kg")
-                },
-                {
-                    "Path": "🟢 Predictive Intervention (PRIME Action)",
-                    "Downtime (min)": _get(pred, "downtime_min"),
-                    "OEE (%)": _get(pred, "oee_pct"),
-                    "Good Units": _get(pred, "good_units"),
-                    "Total Cost ($)": _get(pred, "total_operational_cost_usd"),
-                    "Carbon (kg CO2)": _get(pred, "carbon_kg")
-                }
-            ])
+                col_w1.metric("⏱️ Downtime Prevented", f"{savings.get('downtime_saved_min', 0.0):.1f} min", delta="Reliability")
+                col_w2.metric("💰 Cost Savings", f"${savings.get('cost_saved_usd', 0.0):.2f}", delta="Financial Protection")
+                col_w3.metric("📈 OEE Gain", f"+{savings.get('oee_gain_pct', 0.0):.2f}%", delta="Productivity")
+                col_w4.metric("🌍 Carbon Avoided", f"{carbon_saved:.2f} kg CO2", delta="Sustainability")
 
-            st.dataframe(
-                wi_df.style.highlight_max(subset=["OEE (%)", "Good Units"], color="#d4edda")
-                       .highlight_min(subset=["Total Cost ($)", "Downtime (min)"], color="#d4edda"),
-                use_container_width=True
-            )
+                wi_df = pd.DataFrame([
+                    {
+                        "Path": "🔴 No Intervention (Corrective Breakdown)",
+                        "Downtime (min)": _get(no_int, "downtime_min"),
+                        "OEE (%)": _get(no_int, "oee_pct"),
+                        "Good Units": _get(no_int, "good_units"),
+                        "Total Cost ($)": _get(no_int, "total_operational_cost_usd"),
+                        "Carbon (kg CO2)": _get(no_int, "carbon_kg")
+                    },
+                    {
+                        "Path": "🟢 Predictive Intervention (PRIME Action)",
+                        "Downtime (min)": _get(pred, "downtime_min"),
+                        "OEE (%)": _get(pred, "oee_pct"),
+                        "Good Units": _get(pred, "good_units"),
+                        "Total Cost ($)": _get(pred, "total_operational_cost_usd"),
+                        "Carbon (kg CO2)": _get(pred, "carbon_kg")
+                    }
+                ])
+
+                st.dataframe(
+                    wi_df.style.highlight_max(subset=["OEE (%)", "Good Units"], color="#d4edda")
+                           .highlight_min(subset=["Total Cost ($)", "Downtime (min)"], color="#d4edda"),
+                    use_container_width=True
+                )
         else:
             st.info("Click the button above to run the What-If analysis.")
 
